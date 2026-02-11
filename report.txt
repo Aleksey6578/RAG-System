@@ -1,0 +1,6 @@
+venv\Scripts\activate
+docker run -p 6333:6333 -p 6334:6334 --name qdrant -d qdrant/qdrant:latest
+python prepare_texts.py
+python chunking.py
+python load_qdrant.py
+python rpd_generate.py config.json
