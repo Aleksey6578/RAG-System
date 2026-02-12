@@ -18,12 +18,13 @@ LLM_MODEL = "mistral:latest"
 TOP_K = 5
 MAX_CONTEXT = 6000
 
-SECTIONS = [
-    "Цели дисциплины",
-    "Формируемые компетенции",
-    "Результаты обучения",
-    "Содержание дисциплины",
-    "Фонд оценочных средств"
+# Структура РПД с обязательными разделами
+RPD_STRUCTURE = [
+    "Введение",
+    "Цели",
+    "Задачи",
+    "Темы",
+    "Заключение"
 ]
 
 
@@ -48,35 +49,55 @@ def embed_query(text: str):
 # RETRIEVAL
 # =====================
 def retrieve(section_title: str, discipline: str, level: str):
+    # Поиск примеров для каждого типа раздела
     query_text = f"{discipline}. Уровень: {level}. Раздел: {section_title}"
     q_emb = embed_query(query_text)
 
     client = QdrantClient(QDRANT_URL, check_compatibility=False)
 
-    flt = Filter(
-        must=[
-            FieldCondition(
-                key="section_title",
-                match=MatchValue(value=section_title)
-            )
-        ]
-    )
+    # Определение возможных названий разделов в коллекции для текущего типа
+    possible_titles = []
+    if section_title == "Введение":
+        possible_titles = ["Введение", "Аннотация", "Общие положения"]
+    elif section_title == "Цели":
+        possible_titles = ["Цели дисциплины", "Цель дисциплины", "Цели освоения дисциплины"]
+    elif section_title == "Задачи":
+        possible_titles = ["Задачи дисциплины", "Задачи освоения дисциплины", "Формируемые компетенции"]
+    elif section_title == "Темы":
+        possible_titles = ["Содержание дисциплины", "Тематический план", "Разделы дисциплины"]
+    elif section_title == "Заключение":
+        possible_titles = ["Заключение", "Заключительные положения", "Выводы"]
 
-    hits = client.search(
-        collection_name=COLLECTION,
-        query_vector=q_emb,
-        limit=TOP_K,
-        with_payload=True,
-        query_filter=flt
-    )
+    # Поиск по любому из возможных названий
+    hits = []
+    for title in possible_titles:
+        flt = Filter(
+            must=[
+                FieldCondition(
+                    key="section_title",
+                    match=MatchValue(value=title)
+                )
+            ]
+        )
 
-    return hits
+        current_hits = client.search(
+            collection_name=COLLECTION,
+            query_vector=q_emb,
+            limit=TOP_K//len(possible_titles) or 1,  # Распределение лимита между разными названиями
+            with_payload=True,
+            query_filter=flt
+        )
+        hits.extend(current_hits)
+
+    # Сортировка результатов по релевантности и ограничение до TOP_K
+    hits.sort(key=lambda x: x.score, reverse=True)
+    return hits[:TOP_K]
 
 
 # =====================
 # GENERATION
 # =====================
-def generate_section(title, examples):
+def generate_section(title, examples, discipline, level):
     context = ""
 
     for h in examples:
@@ -88,10 +109,109 @@ def generate_section(title, examples):
 
         context += block
 
-    prompt = f"""
+    # Создание специфического промпта для каждого раздела
+    if title == "Введение":
+        prompt = f"""
 Ты — эксперт по разработке рабочих программ дисциплин.
 
-Сформируй раздел: "{title}".
+Сформируй раздел "{title}" для рабочей программы дисциплины "{discipline}" уровня "{level}".
+
+Раздел должен содержать:
+- Обоснование актуальности дисциплины
+- Место дисциплины в структуре ООП
+- Краткое описание роли дисциплины в подготовке обучающихся
+
+Используй стиль и структуру примеров.
+Не копируй текст дословно.
+
+ПРИМЕРЫ:
+{context}
+
+СГЕНЕРИРУЙ ТЕКСТ:
+"""
+    elif title == "Цели":
+        prompt = f"""
+Ты — эксперт по разработке рабочих программ дисциплин.
+
+Сформируй раздел "{title}" для рабочей программы дисциплины "{discipline}" уровня "{level}".
+
+Раздел должен содержать:
+- Обобщенную цель освоения дисциплины
+- Конкретизацию целей в соответствии с формируемыми компетенциями
+- Связь с другими дисциплинами образовательной программы
+
+Используй стиль и структуру примеров.
+Не копируй текст дословно.
+
+ПРИМЕРЫ:
+{context}
+
+СГЕНЕРИРУЙ ТЕКСТ:
+"""
+    elif title == "Задачи":
+        prompt = f"""
+Ты — эксперт по разработке рабочих программ дисциплин.
+
+Сформируй раздел "{title}" для рабочей программы дисциплины "{discipline}" уровня "{level}".
+
+Раздел должен содержать:
+- Задачи освоения дисциплины, направленные на достижение целей
+- Перечень формируемых общекультурных и профессиональных компетенций
+- Связь задач с планируемыми результатами обучения
+
+Используй стиль и структуру примеров.
+Не копируй текст дословно.
+
+ПРИМЕРЫ:
+{context}
+
+СГЕНЕРИРУЙ ТЕКСТ:
+"""
+    elif title == "Темы":
+        prompt = f"""
+Ты — эксперт по разработке рабочих программ дисциплин.
+
+Сформируй раздел "{title}" для рабочей программы дисциплины "{discipline}" уровня "{level}".
+
+Раздел должен содержать:
+- Тематический план дисциплины
+- Перечень разделов и тем с кратким описанием
+- Объем в часах для каждой темы
+- Формы текущего контроля по темам
+
+Используй стиль и структуру примеров.
+Не копируй текст дословно.
+
+ПРИМЕРЫ:
+{context}
+
+СГЕНЕРИРУЙ ТЕКСТ:
+"""
+    elif title == "Заключение":
+        prompt = f"""
+Ты — эксперт по разработке рабочих программ дисциплин.
+
+Сформируй раздел "{title}" для рабочей программы дисциплины "{discipline}" уровня "{level}".
+
+Раздел должен содержать:
+- Выводы о достижении целей дисциплины
+- Оценку соответствия достигнутых результатов планируемым
+- Рекомендации по совершенствованию рабочей программы
+
+Используй стиль и структуру примеров.
+Не копируй текст дословно.
+
+ПРИМЕРЫ:
+{context}
+
+СГЕНЕРИРУЙ ТЕКСТ:
+"""
+    else:
+        # Для других типов разделов используем общий промпт
+        prompt = f"""
+Ты — эксперт по разработке рабочих программ дисциплин.
+
+Сформируй раздел: "{title}" для дисциплины "{discipline}" уровня "{level}".
 
 Используй стиль и структуру примеров.
 Не копируй текст дословно.
@@ -131,16 +251,20 @@ def main(config_path):
 
     result = []
 
-    for sec_title in SECTIONS:
+    # Генерация всех обязательных разделов РПД
+    for sec_title in RPD_STRUCTURE:
         print(f"Генерация раздела: {sec_title}")
 
         examples = retrieve(sec_title, discipline, level)
-        text = generate_section(sec_title, examples)
+        text = generate_section(sec_title, examples, discipline, level)
 
         result.append(f"\n## {sec_title}\n{text}\n")
 
+    # Добавление заголовка РПД
+    header = f"# Рабочая программа дисциплины\n## {discipline}\n## Уровень: {level}\n\n"
+    
     with open("output_rpd.txt", "w", encoding="utf-8") as f:
-        f.write("\n".join(result))
+        f.write(header + "\n".join(result))
 
     print("Готово. Файл: output_rpd.txt")
 
