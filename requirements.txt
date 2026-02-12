@@ -1,5 +1,8 @@
-qdrant-client
 fastapi
 uvicorn
+qdrant-client
 sentence-transformers
-requests
+transformers
+torch
+accelerate
+numpy
