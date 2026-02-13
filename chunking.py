@@ -1,27 +1,89 @@
 import json
-import os
 import hashlib
+import re
 
 INPUT_FILE = "data_clean.jsonl"
 OUTPUT_FILE = "chunks.jsonl"
+MAX_TOKENS = 300
+OVERLAP = 50
 
-MAX_TOKENS = 300      # ориентировочно 300 слов
-OVERLAP = 50          # перекрытие 50 слов
+
+def classify_section(title):
+    if not title:
+        return 'other'
+    
+    title_lower = title.lower()
+    
+    if 'цел' in title_lower:
+        return 'goals'
+    elif 'компетенц' in title_lower:
+        return 'competencies'
+    elif 'результат' in title_lower and 'обучен' in title_lower:
+        return 'learning_outcomes'
+    elif 'содержан' in title_lower:
+        return 'content'
+    elif 'фос' in title_lower or 'фонд' in title_lower:
+        return 'assessment'
+    elif 'литература' in title_lower or 'библиограф' in title_lower:
+        return 'bibliography'
+    elif 'методическ' in title_lower:
+        return 'methodical'
+    else:
+        return 'other'
 
 
-def split_into_chunks(text, max_tokens=300, overlap=50):
-    words = text.split()
+def extract_metadata(text, section_title):
+    metadata = {
+        'has_competencies': bool(re.search(r'УК-\d+|ОПК-\d+|ПК-\d+', text)),
+        'has_learning_outcomes': bool(re.search(r'\b(знать|уметь|владеть)\b', text.lower())),
+        'has_list': bool(re.search(r'(^\d+\.|^•|^-)', text, re.MULTILINE)),
+        'word_count': len(text.split()),
+        'section_type': classify_section(section_title),
+        'is_substantive': len(text.split()) > 50
+    }
+    return metadata
+
+
+def smart_split(text, max_tokens=300, overlap=50):
+    paragraphs = text.split('\n\n')
     chunks = []
-
-    start = 0
-    while start < len(words):
-        end = start + max_tokens
-        chunk_words = words[start:end]
-        chunk = " ".join(chunk_words)
-        chunks.append(chunk)
-
-        start += max_tokens - overlap
-
+    current_chunk = []
+    current_size = 0
+    
+    for para in paragraphs:
+        words = para.split()
+        para_size = len(words)
+        
+        if para_size > max_tokens:
+            if current_chunk:
+                chunks.append('\n\n'.join(current_chunk))
+                current_chunk = []
+                current_size = 0
+            
+            start = 0
+            while start < len(words):
+                end = start + max_tokens
+                chunk_words = words[start:end]
+                chunks.append(' '.join(chunk_words))
+                start += max_tokens - overlap
+        
+        elif current_size + para_size > max_tokens and current_chunk:
+            chunks.append('\n\n'.join(current_chunk))
+            
+            if overlap > 0 and current_chunk:
+                overlap_para = current_chunk[-1]
+                current_chunk = [overlap_para, para]
+                current_size = len(overlap_para.split()) + para_size
+            else:
+                current_chunk = [para]
+                current_size = para_size
+        else:
+            current_chunk.append(para)
+            current_size += para_size
+    
+    if current_chunk:
+        chunks.append('\n\n'.join(current_chunk))
+    
     return chunks
 
 
@@ -43,14 +105,17 @@ def main():
         section_level = record.get("section_level")
 
         doc_id = generate_doc_id(source)
-
-        section_chunks = split_into_chunks(text, MAX_TOKENS, OVERLAP)
+        section_chunks = smart_split(text, MAX_TOKENS, OVERLAP)
 
         for idx, chunk in enumerate(section_chunks):
-
-            if len(chunk.split()) < 30:
+            words = chunk.split()
+            word_count = len(words)
+            
+            if word_count < 30:
                 continue
-
+            
+            metadata = extract_metadata(chunk, section_title)
+            
             chunks_out.append({
                 "id": global_chunk_id,
                 "doc_id": doc_id,
@@ -58,7 +123,8 @@ def main():
                 "source": source,
                 "section_title": section_title,
                 "section_level": section_level,
-                "text": chunk
+                "text": chunk,
+                "metadata": metadata
             })
 
             global_chunk_id += 1
@@ -67,7 +133,7 @@ def main():
         for c in chunks_out:
             f.write(json.dumps(c, ensure_ascii=False) + "\n")
 
-    print(f"Готово. Создано {len(chunks_out)} чанков.")
+    print(f"Создано чанков: {len(chunks_out)}")
 
 
 if __name__ == "__main__":

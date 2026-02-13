@@ -11,10 +11,8 @@ def clean_text(text: str) -> str:
     text = unicodedata.normalize("NFKC", text)
     text = text.replace("\x00", "")
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-
     text = re.sub(r'\n{3,}', '\n\n', text)
     text = re.sub(r'[ \t]+', ' ', text)
-
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     return "\n".join(lines).strip()
 
@@ -51,8 +49,9 @@ def main():
     with open(OUTPUT_FILE, "w", encoding="utf-8") as out:
         for fn in sorted(os.listdir(DATA_DIR)):
             if fn.endswith(".json"):
-                process_file(os.path.join(DATA_DIR, fn), out)
-
+                path = os.path.join(DATA_DIR, fn)
+                process_file(path, out)
+    
     print(f"Готово. Сохранено в {OUTPUT_FILE}")
 
 
