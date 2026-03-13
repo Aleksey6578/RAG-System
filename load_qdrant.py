@@ -75,7 +75,17 @@ def embed_text(text: str) -> list | None:
             )
             r.raise_for_status()
             d = r.json()
-            return d.get("embedding") or d["data"][0]["embedding"]
+            # [БАГ 2 ИСПРАВЛЕНО]: безопасный fallback.
+            # Раньше: d.get("embedding") or d["data"][0]["embedding"]
+            # Если "embedding" == [] (falsy), шёл к d["data"][...] → KeyError
+            # если ключа "data" нет в ответе (Ollama /api/embeddings всегда
+            # возвращает "embedding", но на случай смены API).
+            vec = d.get("embedding")
+            if not vec:
+                data_list = d.get("data") or []
+                vec = data_list[0].get("embedding") if data_list else None
+            if vec:
+                return vec
         except Exception as e:
             if attempt < RETRY_COUNT:
                 print(f"  Попытка {attempt}/{RETRY_COUNT}: {e}. Повтор через {delay:.0f}с...")

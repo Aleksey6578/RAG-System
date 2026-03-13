@@ -1,27 +1,33 @@
 """
 chunking.py — нарезка очищенных текстов РПД на чанки.
 
-Исправления v3:
-  - [1] БАГ: smart_split → flush(): current_size пересчитывался через
-    len(last.split()), но last — это текст, склеенный через "\\n\\n",
-    и split() по пробелам давал заниженный wc, нарушая overlap.
-    Исправлено: word count хранится отдельно в current_words list.
-  - [2] БАГ: sliding window для длинных параграфов генерировал чанки без
-    проверки MIN_WORDS внутри smart_split — теперь фильтрация добавлена.
-  - [3] БАГ: f.write() стоял внутри цикла без открытого файла — исправлено,
-    запись вынесена в отдельный with-блок после всех циклов.
-  - [G] MAX_TOKENS переименован в MAX_WORDS с явным комментарием о токенах:
-    bge-m3 работает в токенах (лимит 8192), но для простоты считаем в словах.
-    300 слов ≈ 450–600 токенов для русского текста — в пределах лимита.
-  - [H] Добавлен doc_position: порядковый номер чанка внутри документа.
-    Позволяет восстанавливать контекст соседних чанков при retrieval.
-  - GROUPABLE без competencies/learning_outcomes: каждая компетенция/результат
-    остаётся отдельным чанком, иначе embedding размывается.
-  - Лимит per (source, section_type) вместо per source: предотвращает потерю
-    хвостовых разделов (библиография, ФОС) при большом числе чанков в начале.
-  - Дедупликация чанков по SHA-256(text + source).
-  - classify_section расширен: ловит реальные заголовки РПД.
-  - Статистика по типам разделов в итоговом выводе.
+Исправления v3: [1] overlap wc, [2] sliding window MIN_WORDS, [3] f.write,
+  [G] MAX_WORDS→токены, [H] doc_position, GROUPABLE, per-section limit,
+  дедупликация с source, расширенный classify_section, NOISE_LINE_PATTERNS.
+
+Исправления v3.1:
+  - [K] Подсчёт размера чанка через tiktoken (с fallback на слова×1.5).
+
+Исправления v3.2:
+  - [L] ИСПРАВЛЕНО: overlap-механизм в smart_split.
+  - [M] ИСПРАВЛЕНО: разделение metadata на section_metadata и chunk_metadata.
+
+Исправления v3.3:
+  - [N] ИСПРАВЛЕНО: direction/level/department никогда не записывались в чанки.
+    load_qdrant.py ожидает ch.get("direction") и т.д., но chunking.py никогда
+    не передавал эти поля — в Qdrant всегда хранилось "". Фильтр в
+    rpd_generate.py добавлял условие direction = "09.03.01...", которое
+    не совпадало ни с одним чанком → доменная фильтрация [B] всегда молча
+    падала в fallback без фильтра, хотя в логе выглядела рабочей.
+    Исправление: читаем direction/level/department из записи prepare_texts
+    (они там будут, если upstream добавит их в corpus_meta.json или вручную),
+    и всегда пишем в chunk output. Пустая строка — допустимое значение,
+    load_qdrant.py и rpd_generate.py это обрабатывают корректно.
+
+  - [O] ИСПРАВЛЕНО: group_short_chunks обновлял word_count после слияния,
+    но не обновлял token_count_est (поле добавлено в prepare_texts v3.2).
+    Несоответствие приводило к тому, что merged-запись могла иметь
+    token_count_est от одного чанка, а word_count — от объединённого текста.
 """
 
 import json
@@ -32,19 +38,37 @@ from collections import Counter
 INPUT_FILE  = "data_clean.jsonl"
 OUTPUT_FILE = "chunks.jsonl"
 
-# [G] Размер чанка в словах (НЕ в токенах).
-# bge-m3 работает в токенах, лимит 8192.
-# Для русского текста: 1 слово ≈ 1.5–2 токена.
-# 300 слов ≈ 450–600 токенов — безопасно в пределах лимита модели.
-# Для точного подсчёта токенов использовать tiktoken или sentencepiece.
-MAX_WORDS = 300   # ≈ 450–600 токенов bge-m3
+# ---------------------------------------------------------------------------
+# [K] Токенизатор — tiktoken с graceful fallback
+# ---------------------------------------------------------------------------
 
-OVERLAP   = 50    # слов overlap между соседними чанками
-MIN_WORDS = 30    # минимальный размер чанка в словах
+try:
+    import tiktoken
+    _enc = tiktoken.get_encoding("cl100k_base")
 
-# [H] Лимит чанков на один раздел (section_type) одного источника.
-# Замена MAX_CHUNKS_PER_SOURCE (на весь документ) → по 15 на тип раздела:
-# предотвращает потерю хвостовых разделов при большом объёме начальных.
+    def count_tokens(text: str) -> int:
+        return len(_enc.encode(text))
+
+    _COUNT_MODE  = "токены (tiktoken cl100k_base)"
+    MAX_TOKENS   = 400
+    OVERLAP_TOKENS = 60
+    MIN_TOKENS   = 40
+
+except ImportError:
+    _WORD_TO_TOKEN = 1.5
+
+    def count_tokens(text: str) -> int:
+        return int(len(text.split()) * _WORD_TO_TOKEN)
+
+    _COUNT_MODE  = f"слова×{_WORD_TO_TOKEN} (tiktoken не установлен)"
+    MAX_TOKENS   = 450
+    OVERLAP_TOKENS = 75
+    MIN_TOKENS   = 45
+
+MAX_WORDS = MAX_TOKENS
+OVERLAP   = OVERLAP_TOKENS
+MIN_WORDS = MIN_TOKENS
+
 MAX_CHUNKS_PER_SECTION_TYPE = 15
 
 NOISE_TITLES = {
@@ -52,6 +76,10 @@ NOISE_TITLES = {
     "РАБОЧАЯ ПРОГРАММА ДИСЦИПЛИНЫ",
     "рабочая программа дисциплины",
 }
+# [БАГ 3 ИСПРАВЛЕНО]: нормализованный набор для регистронезависимого сравнения.
+# Раньше section_title.strip() in NOISE_TITLES — точное совпадение регистра.
+# "Рабочая программа дисциплины" (Title Case) не совпадало ни с UPPER ни с lower.
+NOISE_TITLES_LOWER = {t.lower() for t in NOISE_TITLES}
 
 
 def classify_section(title: str) -> str:
@@ -60,10 +88,7 @@ def classify_section(title: str) -> str:
     t = title.lower()
     if re.search(r"цел[ьи]|задач[аи]", t):                                     return "goals"
     if re.search(r"компетенц", t):                                               return "competencies"
-    # ОВЗ/доступность — РАНЬШЕ learning_outcomes, чтобы «обучения лиц с ОВЗ»
-    # не классифицировалось как learning_outcomes через слово «обучен».
     if re.search(r"доступн|инвалид|огранич.{0,15}возможн|здоровь|овз", t):     return "accessibility"
-    # learning_outcomes: требуем «результат» + «обучен» рядом, либо «индикатор»
     if re.search(r"результат.{0,10}обучен|индикатор", t):                       return "learning_outcomes"
     if re.search(r"содержан|лекц|лаборатор|практич|тем[аы]", t):               return "content"
     if re.search(r"фос|фонд оценочн|оценочн|аттестац|контрол|виды\s+сро|самостоятельн", t): return "assessment"
@@ -75,7 +100,19 @@ def classify_section(title: str) -> str:
     return "other"
 
 
-def extract_metadata(text: str, section_title: str, block_stype: str = None) -> dict:
+def build_metadata(text: str, section_title: str, source: str,
+                   block_stype: str = None) -> tuple[dict, dict]:
+    """
+    [M] Возвращает (section_metadata, chunk_metadata).
+
+    section_metadata — признаки уровня раздела:
+      section_type, source, section_title
+
+    chunk_metadata — признаки конкретного текстового фрагмента:
+      has_competencies, has_learning_outcomes, has_list,
+      word_count, token_count, is_substantive
+    """
+    # Определяем section_type
     title_stype = classify_section(section_title)
     if block_stype and block_stype != "other":
         INCOMPATIBLE = {
@@ -84,28 +121,43 @@ def extract_metadata(text: str, section_title: str, block_stype: str = None) -> 
             ("learning_outcomes", "assessment"),
             ("competencies",      "accessibility"),
         }
-        if (block_stype, title_stype) in INCOMPATIBLE:
-            stype = title_stype
-        else:
-            stype = block_stype
+        stype = title_stype if (block_stype, title_stype) in INCOMPATIBLE else block_stype
     else:
         stype = title_stype
-    return {
+
+    tc = count_tokens(text)
+
+    section_metadata = {
+        "section_type":  stype,
+        "source":        source,
+        "section_title": section_title or "",
+    }
+
+    chunk_metadata = {
         "has_competencies":      bool(re.search(r"УК-\d+|ОПК-\d+|ПК-\d+", text)),
         "has_learning_outcomes": bool(re.search(r"\b(знать|уметь|владеть)\b", text.lower())),
         "has_list":              bool(re.search(r"(^\d+\.|^•|^-)", text, re.MULTILINE)),
         "word_count":            len(text.split()),
-        "section_type":          stype,
-        "is_substantive":        len(text.split()) > 50,
+        "token_count":           tc,
+        "is_substantive":        tc > MIN_TOKENS,
     }
+
+    return section_metadata, chunk_metadata
+
+
+def extract_metadata(text: str, section_title: str, block_stype: str = None) -> dict:
+    """
+    Обратная совместимость: возвращает объединённую metadata
+    (используется load_qdrant.py через поле "metadata" в чанке).
+    """
+    sec_meta, chunk_meta = build_metadata(text, section_title, "", block_stype)
+    return {**chunk_meta, "section_type": sec_meta["section_type"]}
 
 
 def text_hash(text: str, source: str = "") -> str:
-    """Хеш включает source — одинаковые тексты из разных РПД НЕ схлопываются."""
     return hashlib.sha256(f"{source}\x00{text.strip()}".encode("utf-8")).hexdigest()
 
 
-# Служебные фразы внутри текста чанка — фильтруем строки, а не заголовки
 NOISE_LINE_PATTERNS = re.compile(
     r"^(продолжение\s+таблицы|таблица\s+\d+|окончание\s+таблицы|примечание[\s:—]|"
     r"рисунок\s+\d+|рис\.\s+\d+|источник:|составлено\s+автором)",
@@ -114,68 +166,100 @@ NOISE_LINE_PATTERNS = re.compile(
 
 
 def filter_noise_lines(text: str) -> str:
-    """Удаляет служебные строки из тела чанка."""
     lines = [l for l in text.split("\n")
              if not NOISE_LINE_PATTERNS.match(l.strip())]
     return "\n".join(lines).strip()
 
 
-def smart_split(text: str, max_words: int = MAX_WORDS, overlap: int = OVERLAP) -> list[str]:
+def smart_split(text: str,
+                max_tokens: int = MAX_TOKENS,
+                overlap: int = OVERLAP_TOKENS) -> list[str]:
     """
-    Разбивает текст на чанки по параграфам с overlap.
+    Разбивает текст на чанки по параграфам с token-based overlap.
 
-    ИСПРАВЛЕНИЕ 1: word-count для overlap хранится в current_wcs
-    (список отдельных wc для каждого параграфа), а не пересчитывается через
-    split() от склеенной строки — что давало неверный результат при \n\n.
+    [L] ИСПРАВЛЕН overlap-механизм:
+    Вместо сохранения только последнего параграфа (что давало overlap ≈ 20 слов
+    если параграф был коротким), flush() теперь накапливает параграфы с конца,
+    пока суммарное число токенов не достигнет целевого OVERLAP_TOKENS.
 
-    ИСПРАВЛЕНИЕ 2: чанки из sliding window длинных параграфов проверяются
-    на MIN_WORDS до добавления в результат.
+    Гарантия: overlap всегда >= min(OVERLAP_TOKENS, размер_последнего_чанка).
     """
     paragraphs = text.split("\n\n")
-    chunks:       list[str] = []
-    current:      list[str] = []
-    current_wcs:  list[int] = []
+    chunks:      list[str] = []
+    current:     list[str] = []
+    current_tcs: list[int] = []
     current_size: int       = 0
 
-    def flush(keep_last: bool = True):
-        nonlocal current, current_wcs, current_size
+    def flush(keep_overlap: bool = True):
+        """
+        [L] При keep_overlap=True накапливаем параграфы с конца
+        до набора >= overlap токенов (но не больше max_tokens).
+        """
+        nonlocal current, current_tcs, current_size
         if current:
             chunks.append("\n\n".join(current))
-        if keep_last and current:
-            last     = current[-1]
-            last_wc  = current_wcs[-1]
-            current      = [last]
-            current_wcs  = [last_wc]
-            current_size = last_wc
+
+        if keep_overlap and current:
+            # Идём с конца, набираем overlap
+            overlap_paras: list[str] = []
+            overlap_tcs:   list[int] = []
+            overlap_total: int       = 0
+
+            for para, tc in zip(reversed(current), reversed(current_tcs)):
+                overlap_paras.insert(0, para)
+                overlap_tcs.insert(0, tc)
+                overlap_total += tc
+                if overlap_total >= overlap:
+                    break  # набрали достаточно
+
+            current      = overlap_paras
+            current_tcs  = overlap_tcs
+            current_size = overlap_total
         else:
             current      = []
-            current_wcs  = []
+            current_tcs  = []
             current_size = 0
 
     for para in paragraphs:
         words = para.split()
-        wc    = len(words)
-        if wc == 0:
+        if not words:
             continue
 
-        if wc > max_words:
+        tc = count_tokens(para)
+
+        if tc > max_tokens:
             if current:
-                flush(keep_last=False)
+                flush(keep_overlap=False)
+            # Sliding window по словам
             start = 0
             while start < len(words):
-                end   = start + max_words
-                chunk = " ".join(words[start:end])
-                if len(chunk.split()) >= MIN_WORDS:
-                    chunks.append(chunk)
-                start += max_words - overlap
+                # Берём слова пока не наберём max_tokens
+                end = start + 1
+                while end <= len(words) and count_tokens(" ".join(words[start:end])) < max_tokens:
+                    end += 1
+                chunk_text = " ".join(words[start:end - 1]) if end > start + 1 else " ".join(words[start:end])
+                if count_tokens(chunk_text) >= MIN_TOKENS:
+                    chunks.append(chunk_text)
+                # Сдвигаем на (max_tokens - overlap) токенов вперёд.
+                # [БАГ 4 ИСПРАВЛЕНО]: overlap_words считал слово, вызвавшее break,
+                # как НЕ посчитанное (overlap_words += 1 стоит ПОСЛЕ break).
+                # Теперь инкрементируем ДО проверки условия — overlap точный.
+                overlap_words = 0
+                overlap_tc = 0
+                for w in reversed(words[start: end]):
+                    overlap_words += 1
+                    overlap_tc += count_tokens(w)
+                    if overlap_tc >= overlap:
+                        break
+                start = max(start + 1, end - 1 - overlap_words)
             continue
 
-        if current_size + wc > max_words and current:
-            flush(keep_last=True)
+        if current_size + tc > max_tokens and current:
+            flush(keep_overlap=True)
 
         current.append(para)
-        current_wcs.append(wc)
-        current_size += wc
+        current_tcs.append(tc)
+        current_size += tc
 
     if current:
         chunks.append("\n\n".join(current))
@@ -187,41 +271,38 @@ def generate_doc_id(source: str) -> str:
     return hashlib.md5(source.encode()).hexdigest()
 
 
-def group_short_chunks(records: list, max_group_words: int = 150) -> list:
-    """
-    Группируем короткие строки таблиц одного источника/секции в крупные чанки.
-
-    competencies и learning_outcomes убраны из GROUPABLE:
-    каждая компетенция/результат обучения остаётся отдельным чанком,
-    иначе embedding размывается по нескольким несвязанным компетенциям.
-    Только content и assessment допускают объединение строк.
-    """
+def group_short_chunks(records: list, max_group_tokens: int = 200) -> list:
+    """Группировка коротких строк. GROUPABLE без competencies/learning_outcomes."""
     GROUPABLE = {"content", "assessment"}
     result = []
     i = 0
     while i < len(records):
         r = records[i]
         stype = r.get("section_type")
-        wc = r.get("word_count") or len(r["text"].split())  # [U] используем если есть
-        if stype in GROUPABLE and wc < 60:
+        tc = count_tokens(r["text"])
+        if stype in GROUPABLE and tc < 90:
             group_text = r["text"]
-            group_wc = wc
+            group_tc   = tc
             j = i + 1
             while j < len(records):
                 nxt = records[j]
                 if (nxt.get("section_type") == stype and
                         nxt.get("source") == r.get("source") and
                         nxt.get("section_title") == r.get("section_title")):
-                    nxt_wc = nxt.get("word_count") or len(nxt["text"].split())
-                    if group_wc + nxt_wc <= max_group_words:
+                    nxt_tc = count_tokens(nxt["text"])
+                    if group_tc + nxt_tc <= max_group_tokens:
                         group_text += "\n---\n" + nxt["text"]
-                        group_wc += nxt_wc
+                        group_tc   += nxt_tc
                         j += 1
                         continue
                 break
             merged = dict(r)
-            merged["text"] = group_text
-            merged["word_count"] = group_wc
+            merged["text"]            = group_text
+            merged["word_count"]      = len(group_text.split())
+            # [O] Обновляем token_count_est после слияния.
+            # Раньше merged["token_count_est"] оставался от первого чанка r,
+            # тогда как word_count уже отражал объединённый текст → несоответствие.
+            merged["token_count_est"] = round(len(group_text.split()) * 1.5)
             result.append(merged)
             i = j
         else:
@@ -231,6 +312,9 @@ def group_short_chunks(records: list, max_group_words: int = 150) -> list:
 
 
 def main():
+    print(f"Режим подсчёта: {_COUNT_MODE}")
+    print(f"MAX_TOKENS={MAX_TOKENS}, OVERLAP={OVERLAP_TOKENS}, MIN_TOKENS={MIN_TOKENS}\n")
+
     with open(INPUT_FILE, encoding="utf-8") as f:
         raw_records = [json.loads(line) for line in f]
 
@@ -247,16 +331,24 @@ def main():
         text          = record["text"]
         source        = record["source"]
         section_title = record.get("section_title")
-        section_level = record.get("section_level")
+        section_level = record.get("section_level", 0)
         block_stype   = record.get("section_type")
-        doc_id        = generate_doc_id(source)
+        doc_id        = record.get("document_id") or generate_doc_id(source)
+
+        # [N] Доменные поля для фильтрации в Qdrant.
+        # Читаем из записи prepare_texts (могут быть заданы вручную через
+        # corpus_meta.json или выставлены upstream). Пустая строка — норма:
+        # load_qdrant.py и rpd_generate.py обрабатывают пустые значения корректно.
+        direction  = record.get("direction",  "")
+        level      = record.get("level",      "")
+        department = record.get("department", "")
 
         stats_source.setdefault(source, {
             "records": 0, "chunks": 0, "dups": 0, "by_stype": {}
         })
         stats_source[source]["records"] += 1
 
-        if section_title and section_title.strip() in NOISE_TITLES:
+        if section_title and section_title.strip().lower() in NOISE_TITLES_LOWER:
             continue
 
         stype_for_limit = (
@@ -264,15 +356,14 @@ def main():
             else classify_section(section_title)
         )
 
-        stype_count = stats_source[source]["by_stype"].get(stype_for_limit, 0)
+        stype_count   = stats_source[source]["by_stype"].get(stype_for_limit, 0)
         if stype_count >= MAX_CHUNKS_PER_SECTION_TYPE:
             continue
 
-        # [H] doc_position: счётчик чанков внутри данного источника
         doc_pos_start = stats_source[source]["chunks"]
 
-        for idx, chunk in enumerate(smart_split(text, MAX_WORDS, OVERLAP)):
-            if len(chunk.split()) < MIN_WORDS:
+        for idx, chunk in enumerate(smart_split(text, MAX_TOKENS, OVERLAP_TOKENS)):
+            if count_tokens(chunk) < MIN_TOKENS:
                 continue
 
             h = text_hash(chunk, source)
@@ -283,19 +374,35 @@ def main():
             seen_hashes.add(h)
 
             clean_chunk = filter_noise_lines(chunk)
-            if len(clean_chunk.split()) < MIN_WORDS:
+            if count_tokens(clean_chunk) < MIN_TOKENS:
                 continue
 
+            # [M] Разделяем на section_metadata и chunk_metadata
+            sec_meta, chunk_meta = build_metadata(
+                clean_chunk, section_title, source, block_stype
+            )
+
             chunks_out.append({
-                "id":           global_chunk_id,
-                "doc_id":       doc_id,
-                "chunk_index":  idx,
-                "doc_position": doc_pos_start + idx,  # [H] позиция внутри документа
-                "source":       source,
-                "section_title": section_title,
-                "section_level": section_level,
-                "text":         clean_chunk,
-                "metadata":     extract_metadata(clean_chunk, section_title, block_stype),
+                "id":              global_chunk_id,
+                "doc_id":          doc_id,
+                "chunk_index":     idx,
+                "doc_position":    doc_pos_start + idx,
+                "source":          source,
+                "section_title":   section_title,
+                "section_level":   section_level,
+                "text":            clean_chunk,
+                # [N] Доменные поля — пробрасываем из записи prepare_texts,
+                # чтобы load_qdrant.py мог записать их в Qdrant payload, а
+                # rpd_generate.py — фильтровать по ним. Без этих полей в чанке
+                # Qdrant всегда хранил "" и фильтр [B] никогда не срабатывал.
+                "direction":       direction,
+                "level":           level,
+                "department":      department,
+                # [M] Разделённые metadata
+                "section_metadata": sec_meta,
+                "chunk_metadata":   chunk_meta,
+                # Обратная совместимость с load_qdrant.py
+                "metadata": {**chunk_meta, "section_type": sec_meta["section_type"]},
             })
             global_chunk_id += 1
             stats_source[source]["chunks"] += 1
@@ -309,7 +416,7 @@ def main():
         for c in chunks_out:
             f.write(json.dumps(c, ensure_ascii=False) + "\n")
 
-    print(f"Создано уникальных чанков: {len(chunks_out)} (дублей пропущено: {dup_count})")
+    print(f"Создано уникальных чанков: {len(chunks_out)} (дублей: {dup_count})")
 
     print(f"\n{'Источник':<40} {'Зап.':>5} {'Чанков':>7} {'Дублей':>7}")
     print("-" * 62)
@@ -320,6 +427,11 @@ def main():
     print(f"\nПо типу раздела:")
     for t, n in type_counts.most_common():
         print(f"  {t:<20}: {n}")
+
+    if chunks_out:
+        all_tcs = [c["chunk_metadata"]["token_count"] for c in chunks_out]
+        print(f"\nСтатистика токенов ({_COUNT_MODE}):")
+        print(f"  min={min(all_tcs)}, max={max(all_tcs)}, avg={sum(all_tcs)//len(all_tcs)}")
 
 
 if __name__ == "__main__":
