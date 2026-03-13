@@ -1,16 +1,19 @@
 """
 converter.py — конвертация DOCX-файлов РПД в JSON-блоки.
 
-Исправления v2:
-  - БАГ: flush_buffer(level) вызывался с уровнем НОВОЙ секции вместо текущей.
-    Теперь уровень сохраняется в current_level и передаётся корректно.
-  - БАГ: split_into_chunks — при разбивке длинного параграфа по предложениям
-    переменные buffer/count не сбрасывались после continue, что приводило к
-    переносу остатков в следующий параграф. Исправлено: после цикла по
-    предложениям флашим остаток и сбрасываем buffer/count.
-  - Устранён баг рассинхронизации para_counter / table_counter.
-  - Длинные таблицы (> MAX_TABLE_ROWS строк) разбиваются на несколько блоков.
-  - Глобальный try/except: один сломанный файл не останавливает конвертацию.
+Исправления v3:
+  - [E] Структурированные таблицы: process_table() теперь возвращает
+    {"headers": [...], "rows": [[...]]} вместо pipe-текста.
+    Табличная семантика сохраняется при embedding.
+    table_to_text() переводит структуру в читаемый текст для chunking/RAG.
+    Старые блоки с type="table" используют table_to_text() как раньше,
+    но дополнительно получают поле "table_data" с исходной структурой.
+  - [1] БАГ: flush_buffer(level) вызывался с уровнем НОВОЙ секции вместо
+    текущей. Теперь уровень сохраняется в current_level.
+  - [2] БАГ: split_into_chunks — при разбивке длинного параграфа по
+    предложениям buffer/count не сбрасывались после continue. Исправлено.
+  - [3] Длинные таблицы (> MAX_TABLE_ROWS строк) разбиваются на блоки.
+  - [4] Глобальный try/except: один сломанный файл не останавливает конвертацию.
 """
 
 from docx import Document
@@ -37,16 +40,10 @@ KEY_HEADERS        = [
 ]
 SECTION_RE = re.compile(SECTION_REGEX)
 
-# Маппинг ключевых слов заголовка → section_type
-# ВАЖНО: порядок имеет значение — более специфичные паттерны идут раньше.
 SECTION_TYPE_MAP = [
     (["цел", "задач"],                                              "goals"),
     (["компетенц"],                                                 "competencies"),
-    # ОВЗ/доступность — РАНЬШЕ learning_outcomes, чтобы «обучения лиц с ОВЗ» не
-    # классифицировалось как learning_outcomes через слово «обучен».
     (["доступн", "инвалид", "огранич", "здоровь", "овз"],         "accessibility"),
-    # learning_outcomes: требуем «результат» И «обучен» вместе (через regex в detect_section_type),
-    # либо явное «индикатор» — одиночное «обучен» уже не срабатывает.
     (["результат обучен", "индикатор"],                            "learning_outcomes"),
     (["содержани", "тематическ"],                                   "content"),
     (["лабораторн", "практическ", "семинар", "самостоятельн"],     "assessment"),
@@ -59,7 +56,6 @@ SECTION_TYPE_MAP = [
 
 
 def detect_section_type(section_title: Optional[str]) -> str:
-    """Определяет section_type по заголовку секции."""
     if not section_title:
         return "other"
     t = section_title.lower()
@@ -69,34 +65,104 @@ def detect_section_type(section_title: Optional[str]) -> str:
     return "other"
 
 
-def extract_key_table_rows(table: Table, section_type: str, doc_name: str,
-                           section_title: str) -> List[Dict]:
+# ---------------------------------------------------------------------------
+# [E] Структурированные таблицы
+# ---------------------------------------------------------------------------
+
+def process_table(table: Table) -> Dict:
+    """
+    [E] Возвращает структурированное представление таблицы:
+      {"headers": ["Кол.1", "Кол.2"], "rows": [["val1", "val2"], ...]}
+
+    Вместо старого pipe-текста сохраняется реальная структура.
+    Это улучшает embedding (заголовки ячеек сохраняются как метаданные)
+    и позволяет downstream-коду формировать текст в нужном формате.
+    """
+    raw_rows = []
+    for row in table.rows:
+        cells = []
+        for cell in row.cells:
+            cell_text = " ".join(
+                p.text.strip()
+                for p in cell.paragraphs
+                if p.text.strip()
+            )
+            cells.append(cell_text)
+        # Пропускаем полностью пустые строки
+        if any(c.strip() for c in cells):
+            raw_rows.append(cells)
+
+    if not raw_rows:
+        return {"headers": [], "rows": []}
+
+    return {
+        "headers": raw_rows[0],
+        "rows":    raw_rows[1:],
+    }
+
+
+def table_to_text(table_data: Dict) -> str:
+    """
+    [E] Переводит структурированную таблицу в читаемый текст для RAG.
+
+    Формат: заголовок-строка через " | ", затем строки данных.
+    Использует реальные заголовки столбцов вместо «ячейка | ячейка».
+    """
+    headers = table_data.get("headers", [])
+    rows    = table_data.get("rows", [])
+    if not headers and not rows:
+        return ""
+
+    lines = []
+    if headers:
+        lines.append(" | ".join(str(h) for h in headers))
+        lines.append("-" * max(len(lines[0]), 20))
+
+    for row in rows:
+        if any(str(c).strip() for c in row):
+            lines.append(" | ".join(str(c) for c in row))
+
+    return "\n".join(lines)
+
+
+def extract_key_table_rows(
+    table: Table, section_type: str, doc_name: str, section_title: str
+) -> List[Dict]:
     """
     Для ключевых таблиц (компетенции, результаты, содержание, ЛР/ПЗ)
     извлекает каждую строку данных как отдельный блок с section_type.
 
-    ИСПРАВЛЕНИЕ: строки T5 (результаты обучения) находятся под заголовком
-    «Компетенции...» и поэтому получают тип competencies. Детектируем их
-    по наличию «Знать:/Уметь:/Владеть:» и переопределяем тип на learning_outcomes.
+    [E] Использует структурированный process_table() — каждая строка
+    получает заголовки в качестве контекста.
     """
     if section_type not in ("competencies", "learning_outcomes", "content", "assessment"):
         return []
-    rows = process_table(table)
-    if len(rows) < 2:
+
+    table_data = process_table(table)
+    headers = table_data.get("headers", [])
+    rows    = table_data.get("rows", [])
+
+    if not rows:
         return []
-    header = rows[0]
+
+    header_line = " | ".join(str(h) for h in headers) if headers else ""
     blocks = []
-    for row_text in rows[1:]:
-        row_text = row_text.strip()
-        if not row_text or len(row_text.split()) < 5:
+
+    for row_cells in rows:
+        row_text = " | ".join(str(c) for c in row_cells)
+        if not row_text.strip() or len(row_text.split()) < 5:
             continue
-        text = f"{header}\n{row_text}"
-        # Определяем реальный тип строки: если содержит Знать/Уметь/Владеть — это learning_outcomes
+
+        # Текст чанка включает заголовки для контекста
+        text = f"{header_line}\n{row_text}" if header_line else row_text
+
+        # Определяем реальный тип строки
         row_lower = row_text.lower()
         if any(kw in row_lower for kw in ("знать:", "уметь:", "владеть:", "з(", "у(", "в(")):
             effective_type = "learning_outcomes"
         else:
             effective_type = section_type
+
         blocks.append({
             "title":         doc_name,
             "section_title": section_title,
@@ -105,6 +171,7 @@ def extract_key_table_rows(table: Table, section_type: str, doc_name: str,
             "text":          text,
             "type":          "table_row",
         })
+
     return blocks
 
 
@@ -149,48 +216,51 @@ def is_section_heading(text: str, style_name: Optional[str] = None) -> Tuple[boo
     return False, 0
 
 
-def process_table(table: Table) -> List[str]:
-    """Возвращает строки таблицы в формате 'ячейка | ячейка'."""
-    rows = []
-    for row in table.rows:
-        cells = [
-            " ".join(p.text.strip() for p in cell.paragraphs if p.text.strip())
-            for cell in row.cells
-        ]
-        line = " | ".join(cells)
-        if line.replace("|", "").strip():
-            rows.append(line)
-    return rows
-
-
 def table_to_blocks(
     table: Table,
     doc_name: str,
     section: str,
     section_level: Optional[str],
 ) -> List[Dict]:
-    """Разбивает большую таблицу на блоки по MAX_TABLE_ROWS строк."""
-    rows = process_table(table)
-    if not rows:
+    """
+    [E] Разбивает большую таблицу на блоки по MAX_TABLE_ROWS строк.
+    Каждый блок получает поле "table_data" с исходной структурой.
+    """
+    table_data = process_table(table)
+    headers    = table_data.get("headers", [])
+    data_rows  = table_data.get("rows", [])
+
+    if not headers and not data_rows:
         return []
 
-    header    = rows[0]
-    data_rows = rows[1:]
-    blocks    = []
+    blocks = []
 
     if not data_rows:
-        text = "[ТАБЛИЦА]\n" + "\n".join(rows)
+        text = table_to_text(table_data)
         if len(text.split()) >= MIN_CHUNK_WORDS:
-            blocks.append({"title": doc_name, "section_title": section,
-                           "section_level": section_level, "text": text, "type": "table"})
+            blocks.append({
+                "title":         doc_name,
+                "section_title": section,
+                "section_level": section_level,
+                "text":          "[ТАБЛИЦА]\n" + text,
+                "type":          "table",
+                "table_data":    table_data,   # [E] структурированная копия
+            })
         return blocks
 
     for i in range(0, max(len(data_rows), 1), MAX_TABLE_ROWS):
-        chunk_rows = [header] + data_rows[i : i + MAX_TABLE_ROWS]
-        text       = "[ТАБЛИЦА]\n" + "\n".join(chunk_rows)
+        chunk_rows = data_rows[i: i + MAX_TABLE_ROWS]
+        chunk_data = {"headers": headers, "rows": chunk_rows}
+        text = "[ТАБЛИЦА]\n" + table_to_text(chunk_data)
         if len(text.split()) >= MIN_CHUNK_WORDS:
-            blocks.append({"title": doc_name, "section_title": section,
-                           "section_level": section_level, "text": text, "type": "table"})
+            blocks.append({
+                "title":         doc_name,
+                "section_title": section,
+                "section_level": section_level,
+                "text":          text,
+                "type":          "table",
+                "table_data":    chunk_data,   # [E]
+            })
 
     return blocks
 
@@ -207,8 +277,7 @@ def split_into_chunks(paragraphs: List[str], max_words: int = MAX_CHUNK_WORDS) -
     Разбивает список параграфов на чанки.
 
     ИСПРАВЛЕНИЕ: при разбивке длинного параграфа по предложениям остаток
-    в buffer теперь корректно флашится до continue, а не переносится в
-    следующую итерацию.
+    в sentence_buffer корректно флашится до continue.
     """
     chunks: List[str] = []
     buffer: List[str] = []
@@ -221,7 +290,6 @@ def split_into_chunks(paragraphs: List[str], max_words: int = MAX_CHUNK_WORDS) -
         words = p.split()
         wc    = len(words)
 
-        # ИСПРАВЛЕНИЕ: длинный параграф обрабатывается полностью, включая остаток
         if wc > max_words and not buffer:
             sentence_buffer: List[str] = []
             sentence_count = 0
@@ -235,10 +303,8 @@ def split_into_chunks(paragraphs: List[str], max_words: int = MAX_CHUNK_WORDS) -
                     chunks.append(" ".join(sentence_buffer))
                     sentence_buffer = []
                     sentence_count = 0
-            # Флашим остаток предложений — баг был здесь: они терялись
             if sentence_buffer:
                 chunks.append(" ".join(sentence_buffer))
-            # buffer и count остаются нетронутыми (пустыми)
             continue
 
         count += wc
@@ -312,7 +378,8 @@ def process_document(doc_path: Path) -> List[Dict]:
             if buffer:
                 flush_buffer()
             stype = detect_section_type(current_section)
-            # Для ключевых таблиц — построчная выгрузка (уникальные блоки для каждого РПД)
+
+            # Для ключевых таблиц — построчная выгрузка [E]
             row_blocks = extract_key_table_rows(item, stype, doc_path.name, current_section)
             if row_blocks:
                 blocks.extend(row_blocks)
@@ -324,8 +391,12 @@ def process_document(doc_path: Path) -> List[Dict]:
     if buffer and current_section:
         flush_buffer()
 
+    # [E] document_metadata хранится отдельно в первом блоке
+    # (архитектурно правильнее выносить на уровень документа,
+    #  но для обратной совместимости с prepare_texts.py оставляем в blocks[0])
     if blocks:
         blocks[0]["document_metadata"] = metadata
+
     return blocks
 
 
@@ -333,7 +404,10 @@ def main():
     output_dir = Path(RPD_JSON)
     output_dir.mkdir(exist_ok=True)
 
-    docx_files = [f for f in Path(RPD_CORPUS).glob("*.docx") if not f.name.startswith("~$")]
+    docx_files = [
+        f for f in Path(RPD_CORPUS).glob("*.docx")
+        if not f.name.startswith("~$")
+    ]
     ok = errors = 0
 
     for doc_path in sorted(docx_files):
