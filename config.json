@@ -1,4 +1,20 @@
 {
-  "discipline": "Интеллектуальные системы",
-  "level": "бакалавриат"
+  "discipline":        "Интеллектуальные системы",
+  "level":             "бакалавриат",
+  "department":        "Кафедра вычислительной техники и инженерной кибернетики (ВТИК)",
+  "credits":           4,
+  "hours":             144,
+  "direction":         "09.03.01 Информатика и вычислительная техника",
+  "year":              "2025",
+  "semester":          "7",
+  "hours_lecture":     18,
+  "hours_practice":    36,
+  "hours_lab":         18,
+  "hours_self":        72,
+  "competency_codes":  "УК-1, ОПК-1, ОПК-2, ПК-1, ПК-2",
+
+  "_comment_below":    "Поля для работы с шаблоном DOCX — заполни под свой файл",
+  "template":          "rpd_corpus/rpd_14.docx",
+  "old_discipline":    "Машинное обучение",
+  "old_code":          "37896"
 }
