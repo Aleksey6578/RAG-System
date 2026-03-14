@@ -1062,9 +1062,108 @@ def add_table_row(table, values: list, row_template=None):
     return row
 
 
-def clear_tail_tables(doc: Document, table_indexes: list[int], keep_rows: int = 2):
+TABLE_SIGNATURES = {
+    "topics": {
+        "default_idx": 7,
+        "heading": ["содержание", "дисциплины"],
+        "header": ["раздел", "семестр", "лек", "практ", "лаб", "сро"],
+    },
+    "lectures": {
+        "default_idx": 8,
+        "heading": ["лекци"],
+        "header": ["лекци", "тема", "часы"],
+    },
+    "lab": {
+        "default_idx": 9,
+        "heading": ["лаборатор"],
+        "header": ["лаборатор", "часы"],
+    },
+    "practice": {
+        "default_idx": 10,
+        "heading": ["практическ"],
+        "header": ["практическ", "часы"],
+    },
+    "sro": {
+        "default_idx": 11,
+        "heading": ["самостоятельн"],
+        "header": ["самостоятельн", "часы"],
+    },
+}
+
+
+def _iter_table_contexts(doc: Document) -> list[dict]:
+    """Возвращает контекст таблиц (индекс + соседний заголовок + текст шапки)."""
+    contexts: list[dict] = []
+    recent_paragraphs: list[str] = []
+    table_idx = 0
+    for element in doc.element.body.iterchildren():
+        tag = element.tag.split("}")[-1]
+        if tag == "p":
+            text = _normalize_text("".join(element.itertext()))
+            if text:
+                recent_paragraphs.append(text)
+                recent_paragraphs = recent_paragraphs[-3:]
+            continue
+        if tag != "tbl" or table_idx >= len(doc.tables):
+            continue
+
+        table = doc.tables[table_idx]
+        header_rows = min(2, len(table.rows))
+        header_text = _normalize_text(
+            " ".join(cell.text for row in table.rows[:header_rows] for cell in row.cells)
+        )
+        contexts.append({
+            "index": table_idx,
+            "heading_text": " ".join(recent_paragraphs),
+            "header_text": header_text,
+        })
+        table_idx += 1
+    return contexts
+
+
+def resolve_table_index(doc: Document, purpose: str, resolved_table_ids: dict | None = None) -> int:
+    if purpose not in TABLE_SIGNATURES:
+        raise KeyError(f"Неизвестное назначение таблицы: {purpose}")
+
+    signature = TABLE_SIGNATURES[purpose]
+    candidates = _iter_table_contexts(doc)
+    best_idx = None
+    best_score = -1
+
+    for ctx in candidates:
+        score = 0
+        heading = ctx["heading_text"]
+        header = ctx["header_text"]
+        heading_hits = sum(1 for kw in signature["heading"] if kw in heading)
+        header_hits = sum(1 for kw in signature["header"] if kw in header)
+        if heading_hits:
+            score += 3 + heading_hits
+        score += header_hits
+        if score > best_score:
+            best_score = score
+            best_idx = ctx["index"]
+
+    if best_idx is None or best_score <= 0:
+        best_idx = signature["default_idx"]
+
+    if resolved_table_ids is not None:
+        resolved_table_ids[purpose] = best_idx
+    return best_idx
+
+
+def _validate_table_rows(table, expected_rows: int, start_row: int, label: str):
+    actual_rows = max(len(table.rows) - start_row, 0)
+    if actual_rows != expected_rows:
+        raise ValueError(
+            f"{label}: ожидается {expected_rows} строк(и) данных в шаблоне, найдено {actual_rows}"
+        )
+
+
+def clear_tail_tables(doc: Document, table_purposes: list[str], keep_rows: int = 2,
+                      resolved_table_ids: dict | None = None):
     """Очищает хвостовые таблицы от старого текста шаблона перед заполнением."""
-    for idx in table_indexes:
+    for purpose in table_purposes:
+        idx = resolve_table_index(doc, purpose, resolved_table_ids=resolved_table_ids)
         if idx >= len(doc.tables):
             continue
         table = doc.tables[idx]
@@ -2157,13 +2256,21 @@ def fill_topics_table(doc: Document, topics: list, semester: str, hours_model: d
     ], tmpl)
 
 
-def fill_lectures_table(doc: Document, topics: list, hours: dict):
-    if len(doc.tables) <= 8: raise IndexError(f"Шаблон содержит {len(doc.tables)} таблиц, нужна Т8 (индекс 8)")
-    table = doc.tables[8]
-    tmpl  = clear_table_data_rows(table, start_row=2)
+def fill_lectures_table(doc: Document, topics: list, hours: dict,
+                        resolved_table_ids: dict | None = None):
+    table_idx = resolve_table_index(doc, "lectures", resolved_table_ids=resolved_table_ids)
+    if resolved_table_ids is not None:
+        resolved_table_ids["fill_lectures_table"] = table_idx
+    if len(doc.tables) <= table_idx:
+        raise IndexError(f"Шаблон содержит {len(doc.tables)} таблиц, нужна таблица лекций (индекс {table_idx})")
+    table = doc.tables[table_idx]
 
-    themes_only   = [t for t in topics if not re.match(r"^Раздел\s*\d+", t)]
+    themes_only = [t for t in topics if not re.match(r"^Раздел\s*\d+", t)]
     sections_only = [t for t in topics if re.match(r"^Раздел\s*\d+", t)]
+    expected_rows = len(themes_only) if themes_only else len(sections_only)
+    _validate_table_rows(table, expected_rows=expected_rows, start_row=2, label="Таблица лекций")
+
+    tmpl  = clear_table_data_rows(table, start_row=2)
 
     n_topics = max(len(themes_only), 1) if themes_only else max(len(sections_only), 1)
     lec = max(hours.get("lecture", 12) // n_topics, 1)
@@ -2189,15 +2296,21 @@ def fill_lectures_table(doc: Document, topics: list, hours: dict):
                 tmpl)
 
 
-def fill_lab_table(doc: Document, lab_works: list, topics: list, hours_lab: int = 18):
-    if len(doc.tables) <= 9: raise IndexError(f"Шаблон содержит {len(doc.tables)} таблиц, нужна Т9 (индекс 9)")
-    table = doc.tables[9]
-    tmpl  = clear_table_data_rows(table, start_row=2)
-
+def fill_lab_table(doc: Document, lab_works: list, topics: list, hours_lab: int = 18,
+                   resolved_table_ids: dict | None = None):
     if len(lab_works) < 6:
         print(f"  ⚠️  Т9: получено {len(lab_works)} ЛР — дополняю до 6")
         for j in range(len(lab_works), 6):
             lab_works.append(f"Лабораторная работа {j + 1}")
+
+    table_idx = resolve_table_index(doc, "lab", resolved_table_ids=resolved_table_ids)
+    if resolved_table_ids is not None:
+        resolved_table_ids["fill_lab_table"] = table_idx
+    if len(doc.tables) <= table_idx:
+        raise IndexError(f"Шаблон содержит {len(doc.tables)} таблиц, нужна таблица ЛР (индекс {table_idx})")
+    table = doc.tables[table_idx]
+    _validate_table_rows(table, expected_rows=len(lab_works) + 1, start_row=2, label="Таблица ЛР")
+    tmpl = clear_table_data_rows(table, start_row=2)
 
     sections = [t for t in topics if re.match(r"^Раздел\s*\d+", t)]
     # [БАГ 5 ИСПРАВЛЕНО]: целочисленное деление теряло остаток.
@@ -2215,15 +2328,21 @@ def fill_lab_table(doc: Document, lab_works: list, topics: list, hours_lab: int 
 
 
 def fill_practice_table(doc: Document, practices: list, topics: list,
-                        hours_practice: int = 36):
-    if len(doc.tables) <= 10: raise IndexError(f"Шаблон содержит {len(doc.tables)} таблиц, нужна Т10 (индекс 10)")
-    table = doc.tables[10]
-    tmpl  = clear_table_data_rows(table, start_row=2)
-
+                        hours_practice: int = 36,
+                        resolved_table_ids: dict | None = None):
     if len(practices) < 6:
         print(f"  ⚠️  Т10: получено {len(practices)} ПЗ — дополняю до 6")
         for j in range(len(practices), 6):
             practices.append(f"Практическое занятие {j + 1}")
+
+    table_idx = resolve_table_index(doc, "practice", resolved_table_ids=resolved_table_ids)
+    if resolved_table_ids is not None:
+        resolved_table_ids["fill_practice_table"] = table_idx
+    if len(doc.tables) <= table_idx:
+        raise IndexError(f"Шаблон содержит {len(doc.tables)} таблиц, нужна таблица ПЗ (индекс {table_idx})")
+    table = doc.tables[table_idx]
+    _validate_table_rows(table, expected_rows=len(practices) + 1, start_row=2, label="Таблица ПЗ")
+    tmpl = clear_table_data_rows(table, start_row=2)
 
     sections = [t for t in topics if re.match(r"^Раздел\s*\d+", t)]
     # [БАГ 5 ИСПРАВЛЕНО]: аналогично fill_lab_table — равномерное распределение
@@ -2837,9 +2956,15 @@ def main(config_path: Optional[str] = None):
     # --- Заполнение шаблона ---
     shutil.copy(template, OUTPUT_DOCX)
     doc = Document(OUTPUT_DOCX)
+    resolved_table_ids: dict = {}
 
     # Явная очистка хвостовых таблиц и паспортных блоков до заполнения.
-    clear_tail_tables(doc, table_indexes=[7, 8, 9, 10, 11], keep_rows=2)
+    clear_tail_tables(
+        doc,
+        table_purposes=["topics", "lectures", "lab", "practice", "sro"],
+        keep_rows=2,
+        resolved_table_ids=resolved_table_ids,
+    )
     clear_passport_blocks(doc)
 
     old_name = cfg.get("old_discipline", "").strip() or detect_old_discipline(doc)
@@ -2859,9 +2984,9 @@ def main(config_path: Optional[str] = None):
         ("Т5 Результаты обучения", fill_outcomes_table,     (doc, competencies, outcomes)),
         ("Т6 Виды работы",         fill_t6_workload,        (doc, semester, hours_model)),
         ("Т7 Темы",                fill_topics_table,       (doc, topics, semester, hours_model, codes_list)),
-        ("Т8 Лекции",              fill_lectures_table,     (doc, topics, hours)),
-        ("Т9 ЛР",                  fill_lab_table,          (doc, lab_works, topics, hours["lab"])),
-        ("Т10 ПЗ",                 fill_practice_table,     (doc, practices, topics, hours["practice"])),
+        ("Т8 Лекции",              fill_lectures_table,     (doc, topics, hours, resolved_table_ids)),
+        ("Т9 ЛР",                  fill_lab_table,          (doc, lab_works, topics, hours["lab"], resolved_table_ids)),
+        ("Т10 ПЗ",                 fill_practice_table,     (doc, practices, topics, hours["practice"], resolved_table_ids)),
         ("Т11 СРО",                fill_t11_sro,            (doc, topics, hours_model)),
         ("Т15 Основная лит-ра",    fill_bibliography_main,  (doc, bib_main,   semester)),
         ("Т17 Метод.издания",      fill_bibliography_method,(doc, bib_method, semester)),
@@ -2908,6 +3033,8 @@ def main(config_path: Optional[str] = None):
         print(f"\n✅ Сохранено: {OUTPUT_DOCX}")
 
     # [C] Сохраняем лог генерации
+    _generation_log["resolved_table_ids"] = resolved_table_ids
+
     # [STEP-2] Добавляем счётчики JSON parse failures по секциям.
     for label, fail_count in _json_parse_failures.items():
         if label in _generation_log:
