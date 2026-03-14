@@ -43,6 +43,7 @@ from docx.oxml.ns import qn
 
 OUTPUT_DOCX     = "output_rpd.docx"
 GENERATION_LOG  = "generation_log.json"
+BIBLIOGRAPHY_ALLOWLIST = "bibliography_allowlist.json"
 
 QDRANT = {"url": "http://localhost:6333", "collection": "rpd_rag"}
 OLLAMA = {
@@ -1324,15 +1325,134 @@ def parse_bibliography_json(text: str) -> list | None:
         return None
 
 
+def _normalize_for_match(value: str) -> str:
+    return re.sub(r"[^а-яa-z0-9\s-]", " ", (value or "").lower())
+
+
+def _tokenize_for_match(value: str) -> list[str]:
+    stop_words = {
+        "изд", "издание", "учебник", "учебное", "пособие", "том", "часть",
+        "москва", "санкт", "петербург", "пресс", "год", "с", "стр", "пер",
+        "подход", "система", "данных", "англ", "для", "обработки", "информация",
+    }
+    tokens = re.findall(r"[а-яa-z0-9-]+", _normalize_for_match(value))
+    return [t for t in tokens if len(t) >= 4 and t not in stop_words]
+
+
+def _extract_source_candidates() -> list[dict]:
+    """
+    Собирает потенциальные библиографические строки из chunks.jsonl и rpd_json/*.json.
+    Возвращает список dict: {text, source, section_title}.
+    """
+    candidates: list[dict] = []
+    seen: set[str] = set()
+
+    def _push_line(line: str, source: str, section_title: str):
+        text = re.sub(r"\s+", " ", (line or "").strip())
+        if not text:
+            return
+        if len(text) < 30 or len(text) > 700:
+            return
+        # Базовые признаки библиографической записи.
+        if not re.search(r"(19|20)\d{2}", text):
+            return
+        if "—" not in text and "/" not in text:
+            return
+        key = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append({"text": text, "source": source, "section_title": section_title})
+
+    if os.path.exists("chunks.jsonl"):
+        with open("chunks.jsonl", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                text = row.get("text", "")
+                for part in re.split(r"[\n\r]+", text):
+                    _push_line(part, row.get("source", "chunks.jsonl"), row.get("section_title", ""))
+
+    if os.path.isdir("rpd_json"):
+        for name in os.listdir("rpd_json"):
+            if not name.endswith(".json"):
+                continue
+            path = os.path.join("rpd_json", name)
+            try:
+                data = json.load(open(path, encoding="utf-8"))
+            except Exception:
+                continue
+            for chunk in data.get("chunks", []):
+                text = chunk.get("text", "")
+                for part in re.split(r"[\n\r]+", text):
+                    _push_line(part, name, chunk.get("section_title", ""))
+
+    return candidates
+
+
+def _load_bibliography_allowlist() -> list[dict]:
+    if not os.path.exists(BIBLIOGRAPHY_ALLOWLIST):
+        return []
+    try:
+        payload = json.load(open(BIBLIOGRAPHY_ALLOWLIST, encoding="utf-8"))
+    except Exception:
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [e for e in payload if isinstance(e, dict) and e.get("desc")]
+
+
+def _entry_signature(desc: str) -> tuple[str, set[str]]:
+    tokens = _tokenize_for_match(desc)
+    author = tokens[0] if tokens else ""
+    title_tokens = set(tokens[1:8]) if len(tokens) > 1 else set()
+    return author, title_tokens
+
+
+def _match_entry_to_sources(entry: dict, source_candidates: list[dict]) -> list[dict]:
+    desc = entry.get("desc", "")
+    author_token, title_tokens = _entry_signature(desc)
+    matched: list[dict] = []
+    if not author_token or not title_tokens:
+        return matched
+    for src in source_candidates:
+        src_tokens = set(_tokenize_for_match(src.get("text", "")))
+        title_overlap = len(title_tokens.intersection(src_tokens))
+        if author_token in src_tokens and title_overlap >= 2:
+            matched.append(src)
+    return matched
+
+
+def _is_gost_like(desc: str) -> bool:
+    text = re.sub(r"\s+", " ", (desc or "").strip())
+    return bool(re.search(r"^[А-ЯA-ZЁ][а-яa-zё-]+,\s*[А-ЯA-ZЁ]", text)) and bool(
+        re.search(r"—\s*[А-ЯA-Zа-яё\-\s]+\s*:\s*[^,]+,\s*(19|20)\d{2}\.", text)
+    )
+
+
+def _dedupe_bibliography_entries(entries: list[dict]) -> list[dict]:
+    unique: list[dict] = []
+    seen: set[str] = set()
+    for entry in entries:
+        key = _normalize_for_match(entry.get("desc", ""))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(entry)
+    return unique
+
+
 def gen_bibliography(discipline: str, direction: str = "", level: str = "") -> tuple[list, list]:
     """
     Генерирует основную (Т15) и методическую (Т17) литературу.
     Возвращает (main_entries, method_entries).
     Каждая запись — dict с полями: type/purpose/desc/url/coeff.
 
-    T15: генерируем через LLM с валидацией против галлюцинаций.
-         Признаки галлюцинации: «Фамилия», «Название», «<», «>», «...».
-         При обнаружении — fallback на проверенные реальные учебники.
+    T15: формируем только из подтверждённых источников (RAG-контекст)
+         или из заранее подготовленного allowlist JSON.
+         Новые книги свободно НЕ генерируются.
 
     T17: qwen2.5:3b стабильно копирует «Фамилия, И. О. Название» из промпта.
          Обходим LLM полностью — всегда используем fallback с реальными
@@ -1408,25 +1528,61 @@ def gen_bibliography(discipline: str, direction: str = "", level: str = "") -> t
             },
         ]
 
-    # ── Основная литература — LLM с валидацией ───────────────────────────
-    raw_main = gen(
-        "bibliography_main", discipline, PROMPTS["bibliography_main"],
-        direction=direction, level=level,
-    )
-    llm_entries = parse_bibliography_json(raw_main)
+    # ── Основная литература — только grounding (RAG/allowlist) ───────────
+    source_candidates = _extract_source_candidates()
+    allowlist_entries = _load_bibliography_allowlist() or _make_fallback_main()
 
-    # Отфильтровываем записи с плейсхолдерами / галлюцинированными авторами
-    if llm_entries:
-        clean_entries = [e for e in llm_entries if not _is_placeholder(e.get("desc", ""))]
-        if len(clean_entries) >= 2:
-            main_entries = clean_entries
-            print(f"    ✅ Библиография T15: принято {len(clean_entries)} записей от LLM")
-        else:
-            print(f"    ⚠️  Библиография T15: LLM вернул шаблонные записи → fallback")
-            main_entries = _make_fallback_main()
+    confirmed_entries: list[dict] = []
+    confirmations: list[dict] = []
+    required_count = 3
+
+    for entry in allowlist_entries:
+        if _is_placeholder(entry.get("desc", "")):
+            continue
+        matches = _match_entry_to_sources(entry, source_candidates)
+        if matches:
+            e = dict(entry)
+            e["grounding"] = {
+                "matched": True,
+                "sources": matches[:3],
+                "match_type": "author_title",
+            }
+            confirmed_entries.append(e)
+            confirmations.append({
+                "desc": entry.get("desc", ""),
+                "matched_sources": matches[:3],
+            })
+
+    confirmed_entries = _dedupe_bibliography_entries(
+        [e for e in confirmed_entries if _is_gost_like(e.get("desc", ""))]
+    )
+
+    grounded_fallback = False
+    if len(confirmed_entries) >= required_count:
+        main_entries = confirmed_entries[:required_count]
+        print(f"    ✅ Библиография T15: подтверждено {len(main_entries)} записей из корпуса")
     else:
-        print(f"    ⚠️  Библиография T15: JSON не распарсился → fallback")
-        main_entries = _make_fallback_main()
+        grounded_fallback = True
+        safe_fallback = _dedupe_bibliography_entries(
+            [e for e in allowlist_entries if _is_gost_like(e.get("desc", ""))]
+        )
+        main_entries = safe_fallback[:required_count]
+        print(
+            "    ⚠️  Библиография T15: подтверждений недостаточно "
+            f"({len(confirmed_entries)}/{required_count}) → grounded_fallback"
+        )
+
+    _generation_log["bibliography_main"] = {
+        "mode": "grounded_only",
+        "discipline": discipline,
+        "required_count": required_count,
+        "confirmed_count": len(confirmed_entries),
+        "grounded_fallback": grounded_fallback,
+        "source_candidates_count": len(source_candidates),
+        "confirmations": confirmations,
+        "selected_entries": [e.get("desc", "") for e in main_entries],
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
 
     # ── Методические издания — всегда fallback ───────────────────────────
     # qwen2.5:3b стабильно копирует «Фамилия, И. О. Название» из любого промпта,
