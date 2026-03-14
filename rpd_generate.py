@@ -415,6 +415,26 @@ def _canonical_attestation(value: str) -> str:
     return (value or "").strip() or "экзамен"
 
 
+def build_hours_model(cfg: dict, hours: dict) -> dict:
+    """Единая модель часов для синхронного заполнения таблиц Т3/Т6/Т7/Т11."""
+    lecture = int(hours.get("lecture", 0))
+    practice = int(hours.get("practice", 0))
+    lab = int(hours.get("lab", 0))
+    self_hours = int(hours.get("self", 0))
+    contact = lecture + practice + lab
+    total = contact + self_hours
+    return {
+        "credits": int(cfg.get("credits", 0)),
+        "lecture": lecture,
+        "practice": practice,
+        "lab": lab,
+        "self": self_hours,
+        "contact": contact,
+        "total": total,
+        "attestation": _canonical_attestation(cfg.get("exam_type", "экзамен")),
+    }
+
+
 def _apply_consistency_action(action_mode: str, issues: list[str], title: str, details: str):
     msg = f"{title}: {details}"
     if action_mode == "error":
@@ -423,7 +443,8 @@ def _apply_consistency_action(action_mode: str, issues: list[str], title: str, d
     print(f"  🔧 {msg}")
 
 
-def validate_document_consistency(doc: Document, cfg: dict, hours: dict) -> dict:
+def validate_document_consistency(doc: Document, hours_model: dict,
+                                  consistency_mode: str = "fix") -> dict:
     """
     Проверяет согласованность трудоёмкости/аттестации в документе.
 
@@ -431,25 +452,20 @@ def validate_document_consistency(doc: Document, cfg: dict, hours: dict) -> dict
       - fix   (по умолчанию): конфликтующие ячейки принудительно исправляются;
       - error: генерация завершается ошибкой с понятным сообщением.
     """
-    ze = int(cfg.get("credits", 0))
-    hours_contact = int(hours.get("lecture", 0)) + int(hours.get("practice", 0)) + int(hours.get("lab", 0))
-    hours_self = int(hours.get("self", 0))
-    hours_total = int(cfg.get("hours") or (hours_contact + hours_self))
-    attestation = _canonical_attestation(cfg.get("exam_type", "экзамен"))
-    consistency_mode = str(cfg.get("consistency_mode", "fix")).strip().lower()
-    if consistency_mode not in {"fix", "error"}:
-        consistency_mode = "fix"
+    mode = str(consistency_mode or "fix").strip().lower()
+    if mode not in {"fix", "error"}:
+        mode = "fix"
 
     canonical = {
-        "ze": ze,
-        "hours_total": hours_total,
-        "hours_contact": hours_contact,
-        "hours_self": hours_self,
-        "attestation": attestation,
+        "ze": int(hours_model.get("credits", 0)),
+        "hours_total": int(hours_model.get("total", 0)),
+        "hours_contact": int(hours_model.get("contact", 0)),
+        "hours_self": int(hours_model.get("self", 0)),
+        "attestation": _canonical_attestation(hours_model.get("attestation", "экзамен")),
     }
     result = {
         "canonical": canonical,
-        "mode": consistency_mode,
+        "mode": mode,
         "fixes": [],
         "errors": [],
     }
@@ -473,12 +489,12 @@ def validate_document_consistency(doc: Document, cfg: dict, hours: dict) -> dict
                 current = _first_int(r31.cells[idx].text)
                 if current != expected:
                     _apply_consistency_action(
-                        consistency_mode,
+                        mode,
                         result["errors"],
                         "Раздел 3.1",
                         f"ячейка r5c{idx + 1}='{r31.cells[idx].text.strip()}' → '{expected}'"
                     )
-                    if consistency_mode == "fix":
+                    if mode == "fix":
                         set_cell_text(r31.cells[idx], str(expected))
                         result["fixes"].append(f"Т3 r5c{idx + 1}: {current} → {expected}")
 
@@ -487,12 +503,12 @@ def validate_document_consistency(doc: Document, cfg: dict, hours: dict) -> dict
                 current_att = _canonical_attestation(r31.cells[att_cell_idx].text)
                 if current_att != canonical["attestation"]:
                     _apply_consistency_action(
-                        consistency_mode,
+                        mode,
                         result["errors"],
                         "Раздел 3.1",
                         f"форма аттестации '{r31.cells[att_cell_idx].text.strip()}' → '{canonical['attestation']}'"
                     )
-                    if consistency_mode == "fix":
+                    if mode == "fix":
                         set_cell_text(r31.cells[att_cell_idx], canonical["attestation"])
                         result["fixes"].append(
                             f"Т3 r5c{att_cell_idx + 1}: аттестация → {canonical['attestation']}"
@@ -511,12 +527,12 @@ def validate_document_consistency(doc: Document, cfg: dict, hours: dict) -> dict
                         current_total = _first_int(cell.text)
                         if current_total != canonical["hours_total"]:
                             _apply_consistency_action(
-                                consistency_mode,
+                                mode,
                                 result["errors"],
                                 "ИТОГО ПО ДИСЦИПЛИНЕ",
                                 f"ячейка r{r_idx + 1}c{c_idx + 1}='{cell.text.strip()}' → '{canonical['hours_total']}'"
                             )
-                            if consistency_mode == "fix":
+                            if mode == "fix":
                                 set_cell_text(cell, str(canonical["hours_total"]))
                                 result["fixes"].append(
                                     f"Т3 r{r_idx + 1}c{c_idx + 1}: total → {canonical['hours_total']}"
@@ -543,12 +559,12 @@ def validate_document_consistency(doc: Document, cfg: dict, hours: dict) -> dict
                     current_att = _canonical_attestation(cell.text)
                     if current_att != canonical["attestation"]:
                         _apply_consistency_action(
-                            consistency_mode,
+                            mode,
                             result["errors"],
                             "Форма аттестации",
                             f"Т{t_idx} r{r_idx + 1}c{c_idx + 1}: '{cell.text.strip()}' → '{canonical['attestation']}'"
                         )
-                        if consistency_mode == "fix":
+                        if mode == "fix":
                             set_cell_text(cell, canonical["attestation"])
                             result["fixes"].append(
                                 f"Т{t_idx} r{r_idx + 1}c{c_idx + 1}: аттестация → {canonical['attestation']}"
@@ -562,12 +578,12 @@ def validate_document_consistency(doc: Document, cfg: dict, hours: dict) -> dict
             current_att = _canonical_attestation(paragraph.text)
             if current_att != canonical["attestation"]:
                 _apply_consistency_action(
-                    consistency_mode,
+                    mode,
                     result["errors"],
                     "Форма аттестации (итоговый лист)",
                     f"параграф #{p_idx + 1}: '{paragraph.text.strip()}'"
                 )
-                if consistency_mode == "fix":
+                if mode == "fix":
                     replaced = re.sub(
                         r"(экзамен|зач[её]т|дифференцированный\s+зач[её]т)",
                         canonical["attestation"],
@@ -577,7 +593,7 @@ def validate_document_consistency(doc: Document, cfg: dict, hours: dict) -> dict
                     paragraph.text = replaced
                     result["fixes"].append(f"Параграф #{p_idx + 1}: аттестация → {canonical['attestation']}")
 
-    if consistency_mode == "error" and result["errors"]:
+    if mode == "error" and result["errors"]:
         error_text = "\n".join(f"- {e}" for e in result["errors"])
         raise ValueError("Consistency check failed:\n" + error_text)
 
@@ -1977,7 +1993,7 @@ def fill_outcomes_table(doc: Document, competencies: list, outcomes: list):
             add_table_row(table, [code, indicator, result_code, result_text], tmpl)
 
 
-def fill_topics_table(doc: Document, topics: list, semester: str, hours: dict,
+def fill_topics_table(doc: Document, topics: list, semester: str, hours_model: dict,
                       codes_list: list = None):
     if len(doc.tables) <= 7: raise IndexError(f"Шаблон содержит {len(doc.tables)} таблиц, нужна Т7 (индекс 7)")
     table = doc.tables[7]
@@ -1986,10 +2002,10 @@ def fill_topics_table(doc: Document, topics: list, semester: str, hours: dict,
     sections_only = [t for t in topics if re.match(r"^Раздел\s*\d+", t)]
     n = max(len(sections_only), 1) if sections_only else max(len(topics), 1)
 
-    lec  = hours.get("lecture",  12) // n
-    pz   = hours.get("practice", 36) // n
-    lr   = hours.get("lab",      16) // n
-    sro  = hours.get("self",     62) // n
+    lec  = hours_model.get("lecture",  12) // n
+    pz   = hours_model.get("practice", 36) // n
+    lr   = hours_model.get("lab",      16) // n
+    sro  = hours_model.get("self",     62) // n
     total_l = total_pz = total_lr = total_sro = 0
 
     codes = codes_list or ["ОПК-1", "ПК-1"]
@@ -2094,9 +2110,7 @@ def fill_practice_table(doc: Document, practices: list, topics: list,
     add_table_row(table, ["-", "", "ИТОГО:", str(hours_practice), "", ""], tmpl)
 
 
-def fill_t3_hours(doc: Document, semester: str, credits: int,
-                  hours_total: int, hours_contact: int, hours_sro: int,
-                  exam_type: str):
+def fill_t3_hours(doc: Document, semester: str, hours_model: dict):
     # [БАГ 4 ИСПРАВЛЕНО]: добавлена явная проверка границы — все остальные
     # fill_*() делают raise IndexError, fill_t3_hours молча падал с необработанным
     # IndexError при шаблоне с менее чем 4 таблицами.
@@ -2108,21 +2122,32 @@ def fill_t3_hours(doc: Document, semester: str, credits: int,
     if len(t.rows) < 5:
         return
     row = t.rows[4]
-    vals = [semester, str(credits), str(hours_total), str(hours_contact),
-            str(hours_sro), exam_type]
+    vals = [
+        semester,
+        str(hours_model.get("credits", 0)),
+        str(hours_model.get("total", 0)),
+        str(hours_model.get("contact", 0)),
+        str(hours_model.get("self", 0)),
+        _canonical_attestation(hours_model.get("attestation", "экзамен")),
+    ]
     for i, v in enumerate(vals):
         if i < len(row.cells):
             set_cell_text(row.cells[i], v)
     if len(t.rows) > 5:
         row5 = t.rows[5]
-        for i, v in enumerate(["ИТОГО:", str(credits), str(hours_total),
-                                str(hours_contact), str(hours_sro), ""]):
+        for i, v in enumerate([
+            "ИТОГО:",
+            str(hours_model.get("credits", 0)),
+            str(hours_model.get("total", 0)),
+            str(hours_model.get("contact", 0)),
+            str(hours_model.get("self", 0)),
+            "",
+        ]):
             if i < len(row5.cells):
                 set_cell_text(row5.cells[i], v)
 
 
-def fill_t6_workload(doc: Document, lec: int, pz: int, lr: int, sro: int,
-                     semester: str):
+def fill_t6_workload(doc: Document, semester: str, hours_model: dict):
     t = doc.tables[6]
     sem_col = None
     for j, cell in enumerate(t.rows[0].cells):
@@ -2130,31 +2155,50 @@ def fill_t6_workload(doc: Document, lec: int, pz: int, lr: int, sro: int,
             sem_col = j
             break
     kw_map = {
-        "контактная":            lec + pz + lr,
-        "лекции":                lec,
-        "практические занятия":  pz,
-        "лабораторные работы":   lr,
-        "самостоятельная":       sro,
+        "контактная":            int(hours_model.get("contact", 0)),
+        "лекции":                int(hours_model.get("lecture", 0)),
+        "практические занятия":  int(hours_model.get("practice", 0)),
+        "лабораторные работы":   int(hours_model.get("lab", 0)),
+        "самостоятельная":       int(hours_model.get("self", 0)),
     }
+
+    # Явные правила против дубляжа часов:
+    # - "экзамен" не добавляет новые часы в Т6 (учитывается в форме аттестации Т3);
+    # - "контролируемая самостоятельная работа" входит в SRO и отдельно не суммируется;
+    # - "СПД" (самостоятельная работа под руководством преподавателя) входит в SRO.
+    no_double_count_labels = ("экзам", "контролируемая самостоятельная работа", "спд")
+
     for row in t.rows:
         label = row.cells[0].text.strip().lower()
-        for kw, val in kw_map.items():
-            if kw in label:
-                set_cell_text(row.cells[1], str(val))
-                # [БАГ ИСПРАВЛЕН]: "if sem_col" → False при sem_col=0 (первый столбец).
-                # Если семестр в столбце 0, запись в него молча пропускалась.
-                # Исправление: явная проверка "is not None".
-                if sem_col is not None and sem_col < len(row.cells):
-                    set_cell_text(row.cells[sem_col], str(val))
-                break
+
+        explicit_value = None
+        if any(tag in label for tag in no_double_count_labels):
+            explicit_value = 0
+        else:
+            for kw, val in kw_map.items():
+                if kw in label:
+                    explicit_value = val
+                    break
+
+        if explicit_value is None:
+            continue
+
+        set_cell_text(row.cells[1], str(explicit_value))
+        # [БАГ ИСПРАВЛЕН]: "if sem_col" → False при sem_col=0 (первый столбец).
+        # Если семестр в столбце 0, запись в него молча пропускалась.
+        # Исправление: явная проверка "is not None".
+        if sem_col is not None and sem_col < len(row.cells):
+            set_cell_text(row.cells[sem_col], str(explicit_value))
 
 
-def fill_t11_sro(doc: Document, topics: list, sro: int):
+def fill_t11_sro(doc: Document, topics: list, hours_model: dict):
     if len(doc.tables) <= 11: raise IndexError(f"Шаблон содержит {len(doc.tables)} таблиц, нужна Т11 (индекс 11)")
     t    = doc.tables[11]
     tmpl = clear_table_data_rows(t, start_row=2)
     sections = [tp for tp in topics if re.match(r"^Раздел\s*\d+", tp)]
     n = max(len(sections), 1)
+
+    sro = int(hours_model.get("self", 0))
 
     hrs_study = round(sro * 0.20)
     hrs_rgr   = round(sro * 0.20)
@@ -2204,6 +2248,26 @@ def fill_t21_fos(doc: Document, competencies: list, topics: list):
             n += 1
 
 
+def sync_hours_postfill(doc: Document, semester: str, topics: list, hours_model: dict,
+                        codes_list: Optional[list] = None) -> list[str]:
+    """Пост-проход синхронизации сумм по Т3/Т6/Т7/Т11 с автокоррекцией."""
+    fixes: list[str] = []
+
+    # Т3 и Т6 переписываем из канонической модели.
+    fill_t3_hours(doc, semester, hours_model)
+    fixes.append("Т3 синхронизирована с hours_model")
+    fill_t6_workload(doc, semester, hours_model)
+    fixes.append("Т6 синхронизирована с hours_model")
+
+    # Т7 и Т11 пересобираем, чтобы гарантировать равенство сумм строк и ИТОГО.
+    fill_topics_table(doc, topics, semester, hours_model, codes_list)
+    fixes.append("Т7 пересчитана с hours_model")
+    fill_t11_sro(doc, topics, hours_model)
+    fixes.append("Т11 пересчитана с hours_model")
+
+    return fixes
+
+
 # ---------------------------------------------------------------------------
 # [D] Валидация бизнес-правил
 # ---------------------------------------------------------------------------
@@ -2231,6 +2295,13 @@ def validate_generation(cfg: dict, hours: dict, competencies: list,
     if actual_total != expected_total:
         warnings.append(
             f"⚠️  Сумма часов {actual_total} ≠ {expected_total} из config.json"
+        )
+
+    credits = int(cfg.get("credits", 0))
+    expected_by_credits = credits * 36
+    if credits > 0 and actual_total != expected_by_credits:
+        raise ValueError(
+            f"Конфликт трудоёмкости: total={actual_total} ≠ credits*36={expected_by_credits}"
         )
 
     # Наличие разделов
@@ -2512,6 +2583,7 @@ def main(config_path: Optional[str] = None):
         "lab":      cfg.get("hours_lab",      16),
         "self":     cfg.get("hours_self",     62),
     }
+    hours_model = build_hours_model(cfg, hours)
 
     template = cfg.get("template", "")
     if not template or not os.path.exists(template):
@@ -2652,21 +2724,16 @@ def main(config_path: Optional[str] = None):
         replace_all(doc, f"({old_code})", replacement_code)
         replace_all(doc, old_code, new_code if new_code else "")
 
-    hours_contact = hours["lecture"] + hours["practice"] + hours["lab"]
-    hours_sro     = hours["self"]
-    hours_total   = hours_contact + hours_sro
-    exam_type     = cfg.get("exam_type", "экзамен")
-
     for name, fn, args in [
-        ("Т3 Трудоёмкость",        fill_t3_hours,          (doc, semester, cfg.get("credits", 4), hours_total, hours_contact, hours_sro, exam_type)),
+        ("Т3 Трудоёмкость",        fill_t3_hours,          (doc, semester, hours_model)),
         ("Т4 Компетенции",         fill_competencies_table, (doc, competencies)),
         ("Т5 Результаты обучения", fill_outcomes_table,     (doc, competencies, outcomes)),
-        ("Т6 Виды работы",         fill_t6_workload,        (doc, hours["lecture"], hours["practice"], hours["lab"], hours["self"], semester)),
-        ("Т7 Темы",                fill_topics_table,       (doc, topics, semester, hours, codes_list)),
+        ("Т6 Виды работы",         fill_t6_workload,        (doc, semester, hours_model)),
+        ("Т7 Темы",                fill_topics_table,       (doc, topics, semester, hours_model, codes_list)),
         ("Т8 Лекции",              fill_lectures_table,     (doc, topics, hours)),
         ("Т9 ЛР",                  fill_lab_table,          (doc, lab_works, topics, hours["lab"])),
         ("Т10 ПЗ",                 fill_practice_table,     (doc, practices, topics, hours["practice"])),
-        ("Т11 СРО",                fill_t11_sro,            (doc, topics, hours["self"])),
+        ("Т11 СРО",                fill_t11_sro,            (doc, topics, hours_model)),
         ("Т15 Основная лит-ра",    fill_bibliography_main,  (doc, bib_main,   semester)),
         ("Т17 Метод.издания",      fill_bibliography_method,(doc, bib_method, semester)),
         ("Т21 ФОС",                fill_t21_fos,            (doc, competencies, topics)),
@@ -2678,7 +2745,13 @@ def main(config_path: Optional[str] = None):
             print(f"  ⚠️  {name}: {e}")
 
     try:
-        consistency_check = validate_document_consistency(doc, cfg, hours)
+        postfill_fixes = sync_hours_postfill(doc, semester, topics, hours_model, codes_list)
+        consistency_check = validate_document_consistency(
+            doc,
+            hours_model,
+            consistency_mode=str(cfg.get("consistency_mode", "fix")),
+        )
+        consistency_check["postfill_sync"] = postfill_fixes
         _generation_log["consistency_check"] = consistency_check
         if consistency_check.get("fixes"):
             print("\n🔧 Consistency check: внесены исправления")
