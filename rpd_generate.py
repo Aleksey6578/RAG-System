@@ -1369,6 +1369,27 @@ def post_validate_terms(doc: Document, discipline: str, competencies: list[tuple
 # [A] JSON-парсеры с fallback на regex
 # ---------------------------------------------------------------------------
 
+def _coerce_json_array_payload(data, expected_keys: tuple[str, ...], debug: Optional[dict] = None):
+    """Нормализует JSON-пейлоад к массиву объектов.
+
+    Ollama в JSON-режиме может вернуть объект-обёртку вида
+    {"items": [...]} или {"result": [...]} вместо массива верхнего уровня.
+    """
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        candidate_keys = (
+            "items", "data", "result", "results", "list", "rows",
+            *expected_keys,
+        )
+        for key in candidate_keys:
+            value = data.get(key)
+            if isinstance(value, list):
+                return value
+    _record_parse_debug(debug, schema_error="expected_json_array")
+    return None
+
+
 def parse_competencies_json(text: str, debug: Optional[dict] = None) -> list | None:
     """
     [A] Пытается разобрать JSON-ответ LLM для компетенций.
@@ -1389,8 +1410,8 @@ def parse_competencies_json(text: str, debug: Optional[dict] = None) -> list | N
         except (json.JSONDecodeError, TypeError):
             return None
 
-    if not isinstance(data, list):
-        _record_parse_debug(debug, schema_error="expected_json_array")
+    data = _coerce_json_array_payload(data, ("competencies",), debug=debug)
+    if data is None:
         return None
 
     result = [
@@ -1475,8 +1496,8 @@ def parse_outcomes_json(text: str, debug: Optional[dict] = None) -> list | None:
         except (json.JSONDecodeError, TypeError):
             return None
 
-    if not isinstance(data, list):
-        _record_parse_debug(debug, schema_error="expected_json_array")
+    data = _coerce_json_array_payload(data, ("outcomes",), debug=debug)
+    if data is None:
         return None
 
     result = []
@@ -1608,8 +1629,8 @@ def parse_topics_json(text: str, debug: Optional[dict] = None) -> list | None:
         except (json.JSONDecodeError, TypeError):
             return None
 
-    if not isinstance(data, list):
-        _record_parse_debug(debug, schema_error="expected_json_array")
+    data = _coerce_json_array_payload(data, ("topics", "content"), debug=debug)
+    if data is None:
         return None
 
     topics = []
@@ -1705,8 +1726,8 @@ def parse_list_json(text: str, min_items: int = 3, debug: Optional[dict] = None)
         except (json.JSONDecodeError, TypeError):
             return None
 
-    if not isinstance(data, list):
-        _record_parse_debug(debug, schema_error="expected_json_array")
+    data = _coerce_json_array_payload(data, ("lab_works", "practice", "titles"), debug=debug)
+    if data is None:
         return None
 
     result = [str(d.get("title", "")).strip() for d in data
