@@ -860,7 +860,31 @@ def parse_list_json(text: str, min_items: int = 3) -> list | None:
         return None
 
 
-def parse_list(text: str, discipline: str = "", min_items: int = 3) -> list:
+def _default_list_titles(list_kind: str = "lab_works") -> list[str]:
+    """Безопасные дефолтные заголовки для ЛР/ПЗ."""
+    if list_kind == "practice":
+        return [f"Практическое занятие {i}" for i in range(1, 7)]
+    return [f"Лабораторная работа {i}" for i in range(1, 7)]
+
+
+def _is_human_readable_topic(item: str) -> bool:
+    """Проверяет, что элемент похож на человекочитаемую тему без JSON-символики."""
+    if not isinstance(item, str):
+        return False
+    text = item.strip()
+    if len(text) < 6:
+        return False
+    if re.search(r"[\{\}\[\]\"]", text):
+        return False
+    if re.search(r'"[^\"]+"\s*:', text):
+        return False
+    if any(k in text.lower() for k in ["no лр", "no пз", "трудоемкость, часы", "номер раздела"]):
+        return False
+    return True
+
+
+def parse_list(text: str, discipline: str = "", min_items: int = 3,
+               list_kind: str = "lab_works") -> list:
     """[A] Парсит список ЛР/ПЗ: JSON-режим → regex-fallback.
     [БАГ 3 ИСПРАВЛЕНО]: добавлен параметр min_items (ранее был захардкожен как 3).
     Caller передаёт min_items=6 → fallback-список из 4 ЛР/ПЗ теперь
@@ -877,8 +901,17 @@ def parse_list(text: str, discipline: str = "", min_items: int = 3) -> list:
         "устный", "подготовка к",
     ]
     items = []
+    technical_keys = ("No ЛР", "No ПЗ", "Трудоемкость, часы", "Номер раздела")
     for line in text.split("\n"):
         line = line.strip()
+        if not line:
+            continue
+        if line.startswith(("{", "}", '"')):
+            continue
+        if re.search(r'"[^\"]+"\s*:', line):
+            continue
+        if any(key.lower() in line.lower() for key in technical_keys):
+            continue
         line = re.sub(r"^(ЛР\s*№?\d+|ЛР\s*No\d+|\d+[\.):])\s+", "", line)
         line = re.sub(r"^\*\*(.+)\*\*$", r"\1", line)
         line = re.sub(r"^<[^>]{1,30}>\s*[-–\.\:]?\s*", "", line)
@@ -888,7 +921,7 @@ def parse_list(text: str, discipline: str = "", min_items: int = 3) -> list:
         if any(kw in line.lower() for kw in OFFTRACK_KEYWORDS):
             continue
         items.append(line)
-    return items[:8] if len(items) >= min_items else ["Лабораторная работа 1", "Лабораторная работа 2"]
+    return items[:8] if len(items) >= min_items else _default_list_titles(list_kind)
 
 
 # ---------------------------------------------------------------------------
@@ -1579,6 +1612,21 @@ def gen_with_json_retry(label: str, discipline: str, prompt: str,
     """
     _json_parse_failures.setdefault(label, 0)
 
+    min_items_required = 6 if label in {"lab_works", "practice"} else 3
+
+    def _is_valid_list_output(value) -> bool:
+        if label not in {"lab_works", "practice"}:
+            return True
+        if not isinstance(value, list) or len(value) < min_items_required:
+            return False
+        return all(_is_human_readable_topic(v) for v in value)
+
+    def _fallback_with_reason(reason: str, src_raw: str):
+        if label in _generation_log:
+            _generation_log[label]["fallback_reason"] = reason
+            _generation_log[label]["fallback_applied"] = True
+        return src_raw, parser_fallback(src_raw)
+
     raw = gen(
         label, discipline, prompt,
         direction=direction, level=level,
@@ -1587,9 +1635,16 @@ def gen_with_json_retry(label: str, discipline: str, prompt: str,
         **extra,
     )
     result = parser_json(raw)
-    if result is not None:
+    if result is not None and _is_valid_list_output(result):
         return raw, result
-    _json_parse_failures[label] += 1
+    if result is not None and not _is_valid_list_output(result):
+        _json_parse_failures[label] += 1
+        if label in _generation_log:
+            _generation_log[label]["post_validation_reason"] = (
+                "json_post_validation_failed"
+            )
+    else:
+        _json_parse_failures[label] += 1
 
     for attempt in range(max_retries):
         print(f"  🔄 [{label}] JSON не распарсился (попытка {attempt + 1}/{max_retries}), "
@@ -1603,12 +1658,23 @@ def gen_with_json_retry(label: str, discipline: str, prompt: str,
             **extra,
         )
         result = parser_json(raw)
-        if result is not None:
+        if result is not None and _is_valid_list_output(result):
             return raw, result
+        if result is not None and not _is_valid_list_output(result):
+            if label in _generation_log:
+                _generation_log[label]["post_validation_reason"] = (
+                    "json_post_validation_failed"
+                )
         _json_parse_failures[label] += 1
 
     print(f"  ⚠️  [{label}] JSON недоступен после {max_retries} попыток — regex-fallback")
-    return raw, parser_fallback(raw)
+    fallback_parsed = parser_fallback(raw)
+    if label in {"lab_works", "practice"} and not _is_valid_list_output(fallback_parsed):
+        return _fallback_with_reason("fallback_post_validation_failed", raw)
+    if label in _generation_log:
+        _generation_log[label]["fallback_reason"] = "json_unavailable_regex_fallback"
+        _generation_log[label]["fallback_applied"] = True
+    return raw, fallback_parsed
 
 
 # ---------------------------------------------------------------------------
@@ -1711,14 +1777,14 @@ def main(config_path: Optional[str] = None):
     raw["lab_works"], lab_works = gen_with_json_retry(
         "lab_works", discipline, PROMPTS["lab_works"],
         parser_json=lambda t: parse_list_json(t, min_items=6),
-        parser_fallback=lambda t: parse_list(t, discipline),
+        parser_fallback=lambda t: parse_list(t, discipline, min_items=6, list_kind="lab_works"),
         direction=direction, level=level, **content_vars
     )
 
     raw["practice"], practices = gen_with_json_retry(
         "practice", discipline, PROMPTS["practice"],
         parser_json=lambda t: parse_list_json(t, min_items=6),
-        parser_fallback=lambda t: parse_list(t, discipline),
+        parser_fallback=lambda t: parse_list(t, discipline, min_items=6, list_kind="practice"),
         direction=direction, level=level, **content_vars
     )
 
