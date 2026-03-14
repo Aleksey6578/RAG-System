@@ -69,7 +69,21 @@ MAX_WORDS = MAX_TOKENS
 OVERLAP   = OVERLAP_TOKENS
 MIN_WORDS = MIN_TOKENS
 
-MAX_CHUNKS_PER_SECTION_TYPE = 25  # [БАГ 9 ИСПРАВЛЕНО]: было 15 — крупные РПД теряли контент без предупреждения
+MAX_CHUNKS_PER_SECTION_TYPE_DEFAULT = 25  # базовый лимит для большинства секций
+MAX_CHUNKS_PER_SECTION_TYPE = {
+    "default": MAX_CHUNKS_PER_SECTION_TYPE_DEFAULT,
+    # Для ФОС требуется более широкий охват: ограничение 25 приводило
+    # к потере значимой части оценочных материалов в крупных РПД.
+    "assessment": 60,
+}
+
+
+def get_section_type_limit(section_type: str) -> int:
+    """Возвращает лимит чанков для конкретного типа раздела."""
+    return MAX_CHUNKS_PER_SECTION_TYPE.get(
+        section_type,
+        MAX_CHUNKS_PER_SECTION_TYPE["default"]
+    )
 
 NOISE_TITLES = {
     "УТВЕРЖДАЮ", "СОГЛАСОВАНО", "СВЕДЕНИЯ",
@@ -367,11 +381,12 @@ def main():
             else classify_section(section_title)
         )
 
-        stype_count   = stats_source[source]["by_stype"].get(stype_for_limit, 0)
-        if stype_count >= MAX_CHUNKS_PER_SECTION_TYPE:
+        stype_limit = get_section_type_limit(stype_for_limit)
+        stype_count = stats_source[source]["by_stype"].get(stype_for_limit, 0)
+        if stype_count >= stype_limit:
             # [БАГ 9 ИСПРАВЛЕНО]: предупреждение при срабатывании лимита
             print(
-                f"  ⚠️  [{source}] лимит {MAX_CHUNKS_PER_SECTION_TYPE} чанков "
+                f"  ⚠️  [{source}] лимит {stype_limit} чанков "
                 f"для типа '{stype_for_limit}' достигнут — блок пропущен: "
                 f"{section_title!r:.60}"
             )
@@ -426,7 +441,7 @@ def main():
             stype_count += 1
             stats_source[source]["by_stype"][stype_for_limit] = stype_count
 
-            if stype_count >= MAX_CHUNKS_PER_SECTION_TYPE:
+            if stype_count >= stype_limit:
                 break
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:

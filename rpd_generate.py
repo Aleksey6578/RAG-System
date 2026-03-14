@@ -33,6 +33,7 @@ import sys
 import os
 import shutil
 import time
+import hashlib
 import requests
 from copy import deepcopy
 from typing import Optional
@@ -253,7 +254,7 @@ def retrieve(section: str, discipline: str, section_types: list = None,
             else:
                 text = raw_text
 
-            dedup_key = text[:100]
+            dedup_key = hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
             if dedup_key in seen_texts:
                 continue
             seen_texts.add(dedup_key)
@@ -575,7 +576,9 @@ def parse_competencies(text: str, codes: list = None) -> list:
 def parse_outcomes_json(text: str) -> list | None:
     """
     [A] Пытается разобрать JSON-ответ LLM для результатов обучения.
-    Ожидаемый формат: [{"type": "З", "text": "..."}, ...]
+    Ожидаемые форматы:
+      1) Legacy: [{"type": "З", "text": "..."}, ...]
+      2) По компетенциям: [{"code": "УК-1", "type": "З", "text": "..."}, ...]
     """
     m = re.search(r"\[.*\]", text, re.S)
     if not m:
@@ -584,11 +587,17 @@ def parse_outcomes_json(text: str) -> list | None:
         data = json.loads(m.group())
         if not isinstance(data, list):
             return None
-        result = [
-            (str(d.get("type", "")), str(d.get("text", "")))
-            for d in data
-            if isinstance(d, dict) and d.get("type") in ("З", "У", "В") and d.get("text")
-        ]
+        result = []
+        for d in data:
+            if not isinstance(d, dict):
+                continue
+            otype = str(d.get("type", ""))
+            text_value = str(d.get("text", ""))
+            if otype not in ("З", "У", "В") or not text_value:
+                continue
+
+            code = str(d.get("code", "")).strip()
+            result.append((otype, text_value, code) if code else (otype, text_value))
         return result if len(result) >= 3 else None
     except (json.JSONDecodeError, TypeError):
         return None
@@ -1016,8 +1025,17 @@ def fill_outcomes_table(doc: Document, competencies: list, outcomes: list):
     tmpl  = clear_table_data_rows(table, start_row=1)
 
     type_map: dict = {}
-    for ot, otext in outcomes:
-        type_map[ot] = otext
+    outcomes_by_code: dict[str, dict[str, list[str]]] = {}
+    for item in outcomes:
+        if len(item) == 3:
+            ot, otext, code = item
+            code = code.strip()
+            outcomes_by_code.setdefault(code, {}).setdefault(ot, []).append(otext)
+            type_map.setdefault(ot, otext)
+        else:
+            ot, otext = item
+            type_map.setdefault(ot, otext)
+
     type_map.setdefault("З", "основные концепции и методы дисциплины")
     type_map.setdefault("У", "применять методы дисциплины для решения задач")
     type_map.setdefault("В", "навыками работы с инструментами дисциплины")
@@ -1035,14 +1053,33 @@ def fill_outcomes_table(doc: Document, competencies: list, outcomes: list):
     v_items = split_items(type_map["В"])
     type_prefix = {"З": "Знать:", "У": "Уметь:", "В": "Владеть:"}
 
+    def pick_unique_item(items: list[str], idx: int, code: str, desc: str) -> str:
+        """Выбирает элемент без клонирования первого пункта между компетенциями."""
+        if not items:
+            return ""
+        if len(items) >= len(competencies):
+            return items[idx]
+        base = items[idx % len(items)]
+        # Когда LLM вернул мало пунктов, делаем формулировку уникальной
+        # за счёт привязки к конкретной компетенции.
+        return f"{base} ({code}: {desc[:70].rstrip(' .,;:')})"
+
     for idx, (code, desc) in enumerate(competencies):
         indicator = f"{code}.1 {desc[:100]}"
         for otype, items in [("З", z_items), ("У", u_items), ("В", v_items)]:
             result_code = f"{otype}({code})"
-            rotated = items[idx % len(items):] + items[:idx % len(items)]
-            result_text = f"{type_prefix[otype]} {rotated[0]}"
-            if len(rotated) > 1:
-                result_text += f"\n{rotated[1]}"
+            code_items = outcomes_by_code.get(code, {}).get(otype, [])
+            if code_items:
+                result_text = f"{type_prefix[otype]} {code_items[0]}"
+                if len(code_items) > 1:
+                    result_text += f"\n{code_items[1]}"
+            else:
+                primary = pick_unique_item(items, idx, code, desc)
+                result_text = f"{type_prefix[otype]} {primary}"
+                if len(items) > 1:
+                    secondary = items[(idx + 1) % len(items)]
+                    if secondary != primary:
+                        result_text += f"\n{secondary}"
             add_table_row(table, [code, indicator, result_code, result_text], tmpl)
 
 
@@ -1351,28 +1388,31 @@ PROMPTS = {
 
     "outcomes": """\
 Напиши результаты обучения для дисциплины «{discipline}» по ФГОС 3++.
-Нужно ровно 9 элементов: 3 знания (З), 3 умения (У), 3 навыка (В).
+Сформируй результаты для каждой компетенции отдельно.
+
+Компетенции:
+{competency_codes_numbered}
 
 Правила:
+- для КАЖДОЙ компетенции дай ровно 3 записи: одну З, одну У и одну В
+- формулировки между компетенциями должны быть смыслово разными (без копирования)
 - З: что знает студент — конкретные методы, алгоритмы, технологии дисциплины
 - У: что умеет — начинается с глагола (применять, разрабатывать, анализировать, строить...)
 - В: чем владеет — начинается со слова «навыками», «методами» или «инструментами»
 
 Пример правильного формата:
 [
-  {{"type": "З", "text": "основные методы и алгоритмы машинного обучения для построения интеллектуальных систем"}},
-  {{"type": "З", "text": "архитектуры нейронных сетей и принципы их обучения и оптимизации"}},
-  {{"type": "З", "text": "инструментальные средства разработки и исследования интеллектуальных систем"}},
-  {{"type": "У", "text": "применять алгоритмы классификации, регрессии и кластеризации к прикладным задачам"}},
-  {{"type": "У", "text": "разрабатывать и обучать модели машинного обучения с использованием Python"}},
-  {{"type": "У", "text": "оценивать качество моделей и выбирать оптимальные гиперпараметры"}},
-  {{"type": "В", "text": "навыками реализации алгоритмов глубокого обучения на библиотеках PyTorch и TensorFlow"}},
-  {{"type": "В", "text": "методами предобработки данных и построения признакового пространства"}},
-  {{"type": "В", "text": "инструментами отладки, тестирования и развёртывания интеллектуальных систем"}}
+  {{"code": "УК-1", "type": "З", "text": "..."}},
+  {{"code": "УК-1", "type": "У", "text": "..."}},
+  {{"code": "УК-1", "type": "В", "text": "..."}},
+  {{"code": "ОПК-1", "type": "З", "text": "..."}},
+  {{"code": "ОПК-1", "type": "У", "text": "..."}},
+  {{"code": "ОПК-1", "type": "В", "text": "..."}}
 ]
 
 ВЕРНИ ТОЛЬКО JSON-массив (без пояснений, без markdown).
-Ровно 9 объектов (3З + 3У + 3В). Замени примеры на конкретные результаты для «{discipline}».""",
+Ровно {competency_count}×3 объектов с полями code, type, text.
+Замени примеры на конкретные результаты для «{discipline}».""",
 
     "content": """\
 Напиши содержание дисциплины «{discipline}» — ровно 3 раздела, в каждом 2 темы.
