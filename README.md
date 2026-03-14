@@ -146,3 +146,24 @@ python rpd_generate.py config.json
 ```
 
 После успешного прогона должны появиться `output_rpd.docx` и `generation_log.json`.
+
+## Clean artifacts before commit
+
+Перед коммитом удаляйте временные артефакты генерации и shell-ошибок:
+
+```bash
+# проверить подозрительные пустые файлы в корне
+find . -maxdepth 1 -type f -empty \
+  \( -name 'GENERATION*' -o -name '*_SOFT_LIMIT_CHUNKS' -o -name '[0-9]*' \
+     -o -name 'dict[str' -o -name 'float' -o -name 'int' -o -name 'list' -o -name 'str' -o -name 'stype_limit' \)
+```
+
+В репозитории добавлен pre-commit hook `.githooks/pre-commit`:
+- блокирует коммит пустых файлов с подозрительными именами,
+- предупреждает о бинарных файлах вне whitelist.
+
+Включение hook'а (один раз):
+
+```bash
+git config core.hooksPath .githooks
+```
