@@ -930,6 +930,12 @@ def collect_doc_terms(doc: Document) -> str:
     return _normalize_text("\n".join(chunks))
 
 
+def _contains_topic_phrase(text: str, phrase: str) -> bool:
+    """Проверяет совпадение темы как отдельного слова/фразы, не как подстроки."""
+    pattern = rf"(?<!\w){re.escape(phrase)}(?!\w)"
+    return re.search(pattern, text, flags=re.IGNORECASE) is not None
+
+
 def post_validate_terms(doc: Document, discipline: str, competencies: list[tuple[str, str]]) -> tuple[bool, str]:
     """Пост-валидация: блокирует сохранение DOCX при найденных «чужих» темах/компетенциях."""
     text = collect_doc_terms(doc)
@@ -939,7 +945,10 @@ def post_validate_terms(doc: Document, discipline: str, competencies: list[tuple
     for _, comp_desc in competencies:
         comp_words.update(_tokenize_keywords(comp_desc))
 
-    non_target = sorted({topic for topic in NON_TARGET_TOPICS if topic in text})
+    non_target = sorted({
+        topic for topic in NON_TARGET_TOPICS
+        if _contains_topic_phrase(text, topic)
+    })
     if non_target:
         return False, f"Обнаружены чужие темы: {', '.join(non_target[:6])}"
 
