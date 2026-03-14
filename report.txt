@@ -2,9 +2,16 @@ venv\Scripts\activate
 docker run -p 6333:6333 -p 6334:6334 --name qdrant -d qdrant/qdrant:latest
 cd desktop
 cd project_GitHub
-cd Rag-System
 python converter.py 
 python prepare_texts.py
 python chunking.py
 python load_qdrant.py
 python rpd_generate.py config.json
+
+
+После изменения проекта открываем Терминал
+git add .
+git commit -m "Описание изменений"
+git push
+
+И GitHub репозиторий обновляется после этого
