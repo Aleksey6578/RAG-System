@@ -97,6 +97,28 @@ NON_TARGET_TOPICS = {
     "макроэкономика", "микроэкономика", "бухгалтерский учет", "аудит",
     "гражданское право", "уголовное право", "криминалистика",
     "история россии", "философия", "политология", "социология",
+    "экология", "геология", "геодезия", "металлургия", "нефтегазовое дело",
+    "теплотехника", "электротехника", "сопротивление материалов", "детали машин",
+    "педиатрия", "патологическая анатомия", "ветеринария", "агрономия",
+    "педагогика", "дошкольное образование", "лингвистика", "литературоведение",
+}
+
+TARGET_TERMS_BY_DISCIPLINE = {
+    "интеллектуальные системы": {
+        "интеллектуальные системы", "машинное обучение", "ml", "классификация",
+        "регрессия", "кластеризация", "нейросеть", "нейронные сети", "deep learning",
+        "nlp", "обработка естественного языка", "компьютерное зрение",
+        "рекомендательные системы", "feature engineering", "признаки", "датасет",
+        "обучение с учителем", "обучение без учителя", "градиентный бустинг",
+        "оценка модели", "метрики качества", "переобучение", "кросс-валидация",
+        "python", "pytorch", "tensorflow", "scikit-learn", "llm",
+    },
+}
+
+TOPIC_RELEVANCE = {
+    "embedding_min": 0.31,
+    "min_keyword_hits": 1,
+    "max_irrelevant_share": 0.35,
 }
 
 DISCIPLINE_GUARD = {
@@ -194,6 +216,92 @@ def _discipline_guard_rank(section: str, section_types: list | None,
     })
     return guarded_rank, True, guard_details
 
+
+
+def _get_discipline_target_terms(discipline: str) -> set[str]:
+    """Возвращает словарь целевых терминов для конкретной дисциплины."""
+    normalized = _normalize_text(discipline)
+    terms: set[str] = set()
+    for key, vocab in TARGET_TERMS_BY_DISCIPLINE.items():
+        key_norm = _normalize_text(key)
+        if key_norm and key_norm in normalized:
+            terms.update(_normalize_text(v) for v in vocab if _normalize_text(v))
+    # Всегда добавляем токены названия дисциплины как базовую опору.
+    terms.update(_tokenize_keywords(discipline))
+    return {t for t in terms if t}
+
+
+def classify_topic_relevance(topics: list[str], discipline: str) -> tuple[list[str], dict]:
+    """Классифицирует темы как релевантные/нерелевантные по keywords + embeddings."""
+    target_terms = _get_discipline_target_terms(discipline)
+    discipline_vec = get_embedding(discipline)
+
+    relevant_topics: list[str] = []
+    irrelevant_topics: list[str] = []
+    details: list[dict] = []
+
+    content_topics = [t for t in topics if not re.match(r"^Раздел\s*\d+", t)]
+    for topic in content_topics:
+        topic_norm = _normalize_text(topic)
+        keyword_hits = [term for term in target_terms if term in topic_norm]
+        topic_vec = get_embedding(topic_norm[:512])
+        embedding_score = _cosine_similarity(discipline_vec, topic_vec) if discipline_vec and topic_vec else 0.0
+        non_target_hits = [term for term in NON_TARGET_TOPICS if term in topic_norm]
+
+        is_relevant = (
+            len(keyword_hits) >= TOPIC_RELEVANCE["min_keyword_hits"]
+            and embedding_score >= TOPIC_RELEVANCE["embedding_min"]
+            and not non_target_hits
+        )
+        if is_relevant:
+            relevant_topics.append(topic)
+        else:
+            irrelevant_topics.append(topic)
+
+        details.append({
+            "topic": topic,
+            "keyword_hits": keyword_hits[:6],
+            "embedding_score": round(embedding_score, 4),
+            "non_target_hits": non_target_hits[:4],
+            "relevant": is_relevant,
+        })
+
+    irrelevant_share = (len(irrelevant_topics) / len(content_topics)) if content_topics else 0.0
+
+    # Разделы оставляем, если хотя бы одна тема прошла фильтр; иначе возвращаем исходный список.
+    if relevant_topics:
+        sections = [t for t in topics if re.match(r"^Раздел\s*\d+", t)]
+        filtered_topics = sections + relevant_topics
+    else:
+        filtered_topics = topics[:]
+
+    report = {
+        "discipline": discipline,
+        "target_terms": sorted(target_terms)[:25],
+        "total_topics": len(topics),
+        "content_topics": len(content_topics),
+        "relevant_topics": len(relevant_topics),
+        "irrelevant_topics": len(irrelevant_topics),
+        "irrelevant_share": round(irrelevant_share, 4),
+        "threshold": TOPIC_RELEVANCE["max_irrelevant_share"],
+        "needs_regeneration": bool(content_topics) and irrelevant_share > TOPIC_RELEVANCE["max_irrelevant_share"],
+        "details": details,
+        "mismatch_topics": [d["topic"] for d in details if not d["relevant"]],
+    }
+    return filtered_topics, report
+
+
+def _build_strict_content_prompt(base_prompt: str) -> str:
+    """Ужесточает prompt для повторной генерации только секции content."""
+    tighten = """
+
+ДОПОЛНИТЕЛЬНЫЕ ЖЁСТКИЕ ОГРАНИЧЕНИЯ ПО РЕЛЕВАНТНОСТИ:
+- Включай ТОЛЬКО темы по интеллектуальным системам и машинному обучению.
+- Обязательно используй термины: классификация, регрессия, нейронные сети, NLP, метрики качества.
+- Строго ЗАПРЕЩЕНЫ темы из других дисциплин (химия, медицина, право, экономика, история и т.п.).
+- Если сомневаешься в теме — НЕ включай её в ответ.
+"""
+    return base_prompt + tighten
 # [K] Multi-query: несколько формулировок запроса на секцию.
 # Расширяет семантический охват — разные формулировки дают разные чанки.
 SECTION_QUERIES = {
@@ -2101,7 +2209,8 @@ def fill_t21_fos(doc: Document, competencies: list, topics: list):
 # ---------------------------------------------------------------------------
 
 def validate_generation(cfg: dict, hours: dict, competencies: list,
-                        topics: list, lab_works: list, practices: list) -> list[str]:
+                        topics: list, lab_works: list, practices: list,
+                        relevance_report: Optional[dict] = None) -> list[str]:
     """
     [D] Проверяет корректность сгенерированного содержимого.
     Возвращает список предупреждений (пустой = всё ОК).
@@ -2141,6 +2250,15 @@ def validate_generation(cfg: dict, hours: dict, competencies: list,
     missing = codes_from_cfg - generated_codes
     if missing:
         warnings.append(f"⚠️  Компетенции не сгенерированы: {', '.join(sorted(missing))}")
+
+    # Semantic scope mismatch: конкретные темы, не попавшие в целевую область дисциплины.
+    if relevance_report and relevance_report.get("mismatch_topics"):
+        mismatch_topics = relevance_report.get("mismatch_topics", [])
+        preview = "; ".join(mismatch_topics[:5])
+        warnings.append(
+            "⚠️  Semantic scope mismatch: обнаружены потенциально нерелевантные темы — "
+            f"{preview}"
+        )
 
     return warnings
 
@@ -2465,6 +2583,25 @@ def main(config_path: Optional[str] = None):
         direction=direction, level=level, **content_vars
     )
 
+    filtered_topics, topic_relevance = classify_topic_relevance(topics, discipline)
+    _generation_log["content_topic_relevance"] = topic_relevance
+
+    if topic_relevance.get("needs_regeneration"):
+        print("  ⚠️  [content] высокая доля нерелевантных тем — запускаю регенерацию content")
+        strict_prompt = _build_strict_content_prompt(PROMPTS["content"])
+        raw["content_regenerated"], regenerated_topics = gen_with_json_retry(
+            "content", discipline, strict_prompt,
+            parser_json=parse_topics_json,
+            parser_fallback=parse_topics,
+            direction=direction, level=level, **content_vars
+        )
+        raw["content"] = raw["content_regenerated"]
+        filtered_topics, topic_relevance = classify_topic_relevance(regenerated_topics, discipline)
+        _generation_log["content_topic_relevance"] = topic_relevance
+        topics = regenerated_topics
+
+    topics = filtered_topics
+
     raw["lab_works"], lab_works = gen_with_json_retry(
         "lab_works", discipline, PROMPTS["lab_works"],
         parser_json=lambda t: parse_list_json(t, min_items=6),
@@ -2485,7 +2622,8 @@ def main(config_path: Optional[str] = None):
 
     # --- [D] Валидация ---
     validation_warnings = validate_generation(
-        cfg, hours, competencies, topics, lab_works, practices
+        cfg, hours, competencies, topics, lab_works, practices,
+        relevance_report=topic_relevance
     )
     if validation_warnings:
         print("\n🔎 Результаты валидации:")
