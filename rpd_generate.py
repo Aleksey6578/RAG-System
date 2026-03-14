@@ -72,6 +72,21 @@ SECTION_TYPE_FILTER = {
 EMBED_CACHE    = {}
 RETRIEVE_CACHE = {}
 
+PRIORITY_WEIGHTS = {
+    "high": 1.05,
+    "normal": 1.0,
+    "low": 0.85,
+}
+
+
+def _rank_score(hit: dict) -> float:
+    """Комбинированный score для сортировки retrieval с учётом priority."""
+    payload = hit.get("payload", {})
+    raw_score = hit.get("score", 0.0)
+    priority = str(payload.get("priority", "normal")).lower()
+    weight = PRIORITY_WEIGHTS.get(priority, PRIORITY_WEIGHTS["normal"])
+    return raw_score * weight
+
 # [K] Multi-query: несколько формулировок запроса на секцию.
 # Расширяет семантический охват — разные формулировки дают разные чанки.
 SECTION_QUERIES = {
@@ -211,10 +226,10 @@ def retrieve(section: str, discipline: str, section_types: list = None,
                 if hit_id not in all_hits or h.get("score", 0) > all_hits[hit_id].get("score", 0):
                     all_hits[hit_id] = h
 
-        # Фильтруем по score
+        # Фильтруем по базовому score и ранжируем с учётом priority.
         good_hits = sorted(
             [h for h in all_hits.values() if h.get("score", 0) >= GENERATION["min_score"]],
-            key=lambda h: h.get("score", 0),
+            key=_rank_score,
             reverse=True
         )[:GENERATION["top_k"]]
 
@@ -227,11 +242,15 @@ def retrieve(section: str, discipline: str, section_types: list = None,
                 hits = _search_qdrant(vec, None, GENERATION["top_k"])
                 good_hits = sorted(
                     [h for h in hits if h.get("score", 0) >= GENERATION["min_score"] * 0.7],
-                    key=lambda h: h.get("score", 0), reverse=True
+                    key=_rank_score,
+                    reverse=True
                 )[:GENERATION["top_k"]]
 
-        print(f"    🔍 RAG [{section}]: найдено {len(good_hits)} чанков "
-              f"(scores: {[round(h.get('score', 0), 3) for h in good_hits]})")
+        print(
+            f"    🔍 RAG [{section}]: найдено {len(good_hits)} чанков "
+            f"(scores: {[round(h.get('score', 0), 3) for h in good_hits]}, "
+            f"ranked: {[round(_rank_score(h), 3) for h in good_hits]})"
+        )
 
         # Сборка контекста с метаданными источника
         seen_texts: set = set()
