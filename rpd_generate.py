@@ -114,6 +114,7 @@ SECTION_QUERIES = {
 
 # Глобальный лог генерации — [C]
 _generation_log: dict = {}
+_json_parse_failures: dict = {}
 
 
 # ---------------------------------------------------------------------------
@@ -302,20 +303,27 @@ def retrieve(section: str, discipline: str, section_types: list = None,
         return "", []
 
 
-def llm(prompt: str, max_tokens: int = 600) -> str:
+def llm(prompt: str, max_tokens: int = 600, json_mode: bool = False,
+        temperature: float = 0.3) -> str:
     for attempt in range(3):
         try:
+            options = {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+                "num_ctx": 4096,  # [L] увеличено с 2048
+            }
+            body = {
+                "model": OLLAMA["llm_model"],
+                "prompt": prompt,
+                "stream": False,
+                "options": options,
+            }
+            # [STEP-2] Для JSON-секций просим строгий JSON-формат.
+            if json_mode:
+                body["format"] = "json"
+
             r = requests.post(OLLAMA["generate_url"],
-                json={
-                    "model": OLLAMA["llm_model"],
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.3,
-                        "num_predict": max_tokens,
-                        "num_ctx": 4096,  # [L] увеличено с 2048
-                    }
-                },
+                json=body,
                 timeout=180)
             r.raise_for_status()
             text = r.json().get("response", "")
@@ -353,7 +361,8 @@ def _sanitize_retrieved_text(text: str) -> str:
 
 
 def gen(label: str, discipline: str, prompt: str,
-        direction: str = "", level: str = "", **extra) -> str:
+        direction: str = "", level: str = "", json_mode: bool = False,
+        temperature: float = 0.3, **extra) -> str:
     """
     Генерация секции с RAG-контекстом.
 
@@ -385,7 +394,7 @@ def gen(label: str, discipline: str, prompt: str,
     # Добавляем явно, до **extra — чтобы extra мог при необходимости переопределить.
     fmt_vars = {"discipline": discipline, "direction": direction, "level": level, **extra}
     full_prompt = ctx_block + prompt.format(**fmt_vars) + f"\n\nСоздай для «{discipline}»:"
-    result = llm(full_prompt)
+    result = llm(full_prompt, json_mode=json_mode, temperature=temperature)
 
     # [C] Логируем для generation_log.json
     _generation_log[label] = {
@@ -1522,18 +1531,35 @@ def gen_with_json_retry(label: str, discipline: str, prompt: str,
     3. При неудаче: до max_retries перегенераций
     4. Если JSON так и не распарсился — regex-fallback через parser_fallback
     """
-    raw = gen(label, discipline, prompt, direction=direction, level=level, **extra)
+    _json_parse_failures.setdefault(label, 0)
+
+    raw = gen(
+        label, discipline, prompt,
+        direction=direction, level=level,
+        json_mode=True,
+        temperature=0.2,
+        **extra,
+    )
     result = parser_json(raw)
     if result is not None:
         return raw, result
+    _json_parse_failures[label] += 1
 
     for attempt in range(max_retries):
         print(f"  🔄 [{label}] JSON не распарсился (попытка {attempt + 1}/{max_retries}), "
               f"перегенерация...")
-        raw = gen(label, discipline, prompt, direction=direction, level=level, **extra)
+        retry_temperature = 0.15 if attempt == 0 else 0.1
+        raw = gen(
+            label, discipline, prompt,
+            direction=direction, level=level,
+            json_mode=True,
+            temperature=retry_temperature,
+            **extra,
+        )
         result = parser_json(raw)
         if result is not None:
             return raw, result
+        _json_parse_failures[label] += 1
 
     print(f"  ⚠️  [{label}] JSON недоступен после {max_retries} попыток — regex-fallback")
     return raw, parser_fallback(raw)
@@ -1710,6 +1736,11 @@ def main(config_path: Optional[str] = None):
     print(f"\n✅ Сохранено: {OUTPUT_DOCX}")
 
     # [C] Сохраняем лог генерации
+    # [STEP-2] Добавляем счётчики JSON parse failures по секциям.
+    for label, fail_count in _json_parse_failures.items():
+        if label in _generation_log:
+            _generation_log[label]["json_parse_failures"] = fail_count
+
     try:
         with open(GENERATION_LOG, "w", encoding="utf-8") as f:
             json.dump(_generation_log, f, ensure_ascii=False, indent=2)
