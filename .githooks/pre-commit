@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SUSPICIOUS_EXACT=(
+  "800"
+  "GENERATION[min_score]"
+  "GENERATION[min_score]]"
+  "LONG_DOC_SOFT_LIMIT_CHUNKS"
+  "dict[str"
+  "float"
+  "int"
+  "list"
+  "str"
+  "stype_limit"
+)
+
+is_suspicious_name() {
+  local name="$1"
+  local base
+  base="$(basename "$name")"
+
+  for s in "${SUSPICIOUS_EXACT[@]}"; do
+    if [[ "$base" == "$s" ]]; then
+      return 0
+    fi
+  done
+
+  # Numeric junk files like "800", "1234"
+  if [[ "$base" =~ ^[0-9]{2,6}$ ]]; then
+    return 0
+  fi
+
+  # Generation leftovers
+  if [[ "$base" == GENERATION* || "$base" == *_SOFT_LIMIT_CHUNKS ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+failed=0
+while IFS= read -r file; do
+  [[ -e "$file" ]] || continue
+  if is_suspicious_name "$file"; then
+    size=$(wc -c < "$file")
+    if [[ "$size" -eq 0 ]]; then
+      echo "ERROR: staged empty suspicious file: $file"
+      failed=1
+    fi
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+if [[ "$failed" -eq 1 ]]; then
+  cat <<'MSG'
+Commit blocked.
+Remove these artifacts or unstage them before committing.
+MSG
+  exit 1
+fi
+
+# Warn (but do not block) on staged binary files outside whitelist.
+WHITELIST_EXT_REGEX='\.(png|jpg|jpeg|gif|webp|ico|pdf|docx|xlsx|pptx|zip|gz|tar)$'
+warned=0
+
+while IFS=$'\t' read -r added deleted path; do
+  [[ -n "$path" ]] || continue
+  if [[ "$added" == "-" && "$deleted" == "-" ]]; then
+    if ! [[ "$path" =~ $WHITELIST_EXT_REGEX ]]; then
+      if [[ "$warned" -eq 0 ]]; then
+        echo "WARNING: Non-whitelisted binary artifacts are staged:"
+      fi
+      echo "  - $path"
+      warned=1
+    fi
+  fi
+done < <(git diff --cached --numstat --diff-filter=ACMR)
+
+if [[ "$warned" -eq 1 ]]; then
+  cat <<'MSG'
+Please verify these binaries are intended.
+(To enforce this hook, set: git config core.hooksPath .githooks)
+MSG
+fi
