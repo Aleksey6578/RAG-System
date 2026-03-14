@@ -35,6 +35,7 @@ import shutil
 import time
 import hashlib
 import requests
+from math import sqrt
 from copy import deepcopy
 from typing import Optional
 from docx import Document
@@ -85,6 +86,24 @@ PRIORITY_WEIGHTS = {
     "low": 0.85,
 }
 
+DISCIPLINE_FILTER_SECTION_TYPES = {"content", "hours", "assessment"}
+
+# Устойчивые темы «чужих» дисциплин: используем для понижения веса retrieval.
+NON_TARGET_TOPICS = {
+    "неорганическая химия", "органическая химия", "аналитическая химия",
+    "физическая химия", "квантовая химия", "биохимия", "микробиология",
+    "ботаника", "зоология", "фармакология", "терапия", "хирургия",
+    "макроэкономика", "микроэкономика", "бухгалтерский учет", "аудит",
+    "гражданское право", "уголовное право", "криминалистика",
+    "история россии", "философия", "политология", "социология",
+}
+
+DISCIPLINE_GUARD = {
+    "embedding_min": 0.33,
+    "keyword_min": 0.08,
+    "penalty_weight": 0.55,
+}
+
 
 def _rank_score(hit: dict) -> float:
     """Комбинированный score для сортировки retrieval с учётом priority."""
@@ -109,6 +128,70 @@ def _apply_source_diversity(hits: list[dict], max_per_source: int) -> list[dict]
             src_counts[src] = src_counts.get(src, 0) + 1
         selected.append(h)
     return selected
+
+
+def _tokenize_keywords(text: str) -> set[str]:
+    words = re.findall(r"[а-яa-z0-9-]+", (text or "").lower())
+    keys = {w for w in words if len(w) >= 4}
+    norm_full = _normalize_text(text)
+    if norm_full:
+        keys.add(norm_full)
+    return keys
+
+
+def _cosine_similarity(v1: list[float], v2: list[float]) -> float:
+    if not v1 or not v2 or len(v1) != len(v2):
+        return 0.0
+    dot = sum(a * b for a, b in zip(v1, v2))
+    n1 = sqrt(sum(a * a for a in v1))
+    n2 = sqrt(sum(b * b for b in v2))
+    if n1 == 0 or n2 == 0:
+        return 0.0
+    return dot / (n1 * n2)
+
+
+def _discipline_guard_rank(section: str, section_types: list | None,
+                           discipline: str, hit: dict,
+                           discipline_vec: list[float],
+                           discipline_keywords: set[str]) -> tuple[float, bool, dict]:
+    payload = hit.get("payload", {})
+    text = _normalize_text(payload.get("text", ""))
+    base_rank = _rank_score(hit)
+    guard_details = {"base_rank": round(base_rank, 4)}
+
+    target_scope = bool(section_types) and bool(
+        DISCIPLINE_FILTER_SECTION_TYPES.intersection({str(s).lower() for s in section_types})
+    )
+    if section == "content":
+        target_scope = True
+    if not target_scope or not text:
+        return base_rank, False, guard_details
+
+    matched = sum(1 for kw in discipline_keywords if kw in text)
+    keyword_score = matched / max(len(discipline_keywords), 1)
+    chunk_vec = get_embedding(text[:512])
+    embedding_score = _cosine_similarity(discipline_vec, chunk_vec) if discipline_vec and chunk_vec else 0.0
+
+    non_target_hits = sum(1 for t in NON_TARGET_TOPICS if t in text)
+    penalty = DISCIPLINE_GUARD["penalty_weight"] ** non_target_hits if non_target_hits else 1.0
+
+    passes = (
+        embedding_score >= DISCIPLINE_GUARD["embedding_min"]
+        and keyword_score >= DISCIPLINE_GUARD["keyword_min"]
+    )
+
+    # Комбинированный score: релевантность по дисциплине + штраф за «чужие» темы.
+    relevance_weight = (0.55 + 0.45 * embedding_score) * (0.6 + 0.4 * min(keyword_score * 3, 1.0))
+    guarded_rank = base_rank * relevance_weight * penalty
+    guard_details.update({
+        "keyword_score": round(keyword_score, 4),
+        "embedding_score": round(embedding_score, 4),
+        "non_target_hits": non_target_hits,
+        "penalty": round(penalty, 4),
+        "guarded_rank": round(guarded_rank, 4),
+        "pass": passes,
+    })
+    return guarded_rank, True, guard_details
 
 # [K] Multi-query: несколько формулировок запроса на секцию.
 # Расширяет семантический охват — разные формулировки дают разные чанки.
@@ -446,8 +529,28 @@ def retrieve(section: str, discipline: str, section_types: list = None,
             reverse=True
         )[:GENERATION["retrieve_top_k"]]
 
-        # [STEP-3] Фаза 2: rerank по приоритету + diversity по source.
-        reranked_hits = sorted(raw_hits, key=_rank_score, reverse=True)
+        # [NEW] Двухуровневый дисциплинарный guard (keyword + embedding)
+        # на этапе выбора контекста для content/hours/assessment.
+        discipline_vec = get_embedding(discipline)
+        discipline_keywords = _tokenize_keywords(discipline)
+        filtered_hits: list[dict] = []
+        for h in raw_hits:
+            guarded_rank, checked, details = _discipline_guard_rank(
+                section, section_types, discipline, h, discipline_vec, discipline_keywords
+            )
+            h["_guarded_rank"] = guarded_rank
+            h["_guard_checked"] = checked
+            h["_guard"] = details
+            if checked and not details.get("pass", False):
+                continue
+            filtered_hits.append(h)
+
+        # [STEP-3] Фаза 2: rerank по приоритету + discipline-guard + diversity по source.
+        reranked_hits = sorted(
+            filtered_hits,
+            key=lambda h: h.get("_guarded_rank", _rank_score(h)),
+            reverse=True,
+        )
         reranked_hits = _apply_source_diversity(
             reranked_hits, GENERATION["max_chunks_per_source"]
         )
@@ -465,16 +568,33 @@ def retrieve(section: str, discipline: str, section_types: list = None,
                     key=lambda h: h.get("score", 0),
                     reverse=True
                 )[:GENERATION["retrieve_top_k"]]
-                reranked_hits = sorted(raw_hits, key=_rank_score, reverse=True)
+                discipline_vec = get_embedding(discipline)
+                discipline_keywords = _tokenize_keywords(discipline)
+                filtered_hits = []
+                for h in raw_hits:
+                    guarded_rank, checked, details = _discipline_guard_rank(
+                        section, section_types, discipline, h, discipline_vec, discipline_keywords
+                    )
+                    h["_guarded_rank"] = guarded_rank
+                    h["_guard_checked"] = checked
+                    h["_guard"] = details
+                    if checked and not details.get("pass", False):
+                        continue
+                    filtered_hits.append(h)
+                reranked_hits = sorted(
+                    filtered_hits,
+                    key=lambda h: h.get("_guarded_rank", _rank_score(h)),
+                    reverse=True,
+                )
                 reranked_hits = _apply_source_diversity(
                     reranked_hits, GENERATION["max_chunks_per_source"]
                 )
                 good_hits = reranked_hits[:GENERATION["top_k"]]
 
         print(
-            f"    🔍 RAG [{section}]: raw={len(raw_hits)} → reranked={len(good_hits)} "
+            f"    🔍 RAG [{section}]: raw={len(raw_hits)} → filtered={len(filtered_hits)} → reranked={len(good_hits)} "
             f"(scores: {[round(h.get('score', 0), 3) for h in good_hits]}, "
-            f"ranked: {[round(_rank_score(h), 3) for h in good_hits]})"
+            f"ranked: {[round(h.get('_guarded_rank', _rank_score(h)), 3) for h in good_hits]})"
         )
 
         # Сборка контекста с метаданными источника
@@ -763,6 +883,71 @@ def add_table_row(table, values: list, row_template=None):
         if i < len(row.cells):
             set_cell_text(row.cells[i], str(val))
     return row
+
+
+def clear_tail_tables(doc: Document, table_indexes: list[int], keep_rows: int = 2):
+    """Очищает хвостовые таблицы от старого текста шаблона перед заполнением."""
+    for idx in table_indexes:
+        if idx >= len(doc.tables):
+            continue
+        table = doc.tables[idx]
+        if len(table.rows) <= keep_rows:
+            continue
+        clear_table_data_rows(table, start_row=keep_rows)
+
+
+def clear_passport_blocks(doc: Document):
+    """Явно очищает паспортные блоки (табличные поля и маркерные абзацы)."""
+    # Таблица трудоёмкости/паспорта: чистим строку семестра и строку ИТОГО.
+    if len(doc.tables) > 3 and len(doc.tables[3].rows) > 5:
+        for row_idx in (4, 5):
+            row = doc.tables[3].rows[row_idx]
+            for cell in row.cells:
+                set_cell_text(cell, "")
+
+    # Таблица ФОС: полностью очищаем данные, чтобы старые компетенции не оставались.
+    if len(doc.tables) > 21:
+        clear_table_data_rows(doc.tables[21], start_row=1)
+
+    # Маркерные паспортные абзацы (часто остаются в шаблоне отдельным текстом).
+    passport_markers = ("паспорт", "код и направление подготовки", "рабочая программа дисциплины")
+    for para in doc.paragraphs:
+        text = _normalize_text(para.text)
+        if not text:
+            continue
+        if any(marker in text for marker in passport_markers) and "{" in para.text:
+            for run in para.runs:
+                run.text = ""
+
+
+def collect_doc_terms(doc: Document) -> str:
+    chunks: list[str] = [p.text for p in doc.paragraphs]
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                chunks.append(cell.text)
+    return _normalize_text("\n".join(chunks))
+
+
+def post_validate_terms(doc: Document, discipline: str, competencies: list[tuple[str, str]]) -> tuple[bool, str]:
+    """Пост-валидация: блокирует сохранение DOCX при найденных «чужих» темах/компетенциях."""
+    text = collect_doc_terms(doc)
+    discipline_keys = _tokenize_keywords(discipline)
+
+    comp_words = set()
+    for _, comp_desc in competencies:
+        comp_words.update(_tokenize_keywords(comp_desc))
+
+    non_target = sorted({topic for topic in NON_TARGET_TOPICS if topic in text})
+    if non_target:
+        return False, f"Обнаружены чужие темы: {', '.join(non_target[:6])}"
+
+    # Если нет опорных слов дисциплины и компетенций — вероятно в документе чужой хвост.
+    support_hits = sum(1 for kw in discipline_keys.union(comp_words) if kw and kw in text)
+    if support_hits < 3:
+        return False, "Недостаточно терминов целевой дисциплины после заполнения шаблона"
+
+    return True, "ok"
 
 
 # ---------------------------------------------------------------------------
@@ -1997,6 +2182,10 @@ def main(config_path: Optional[str] = None):
     shutil.copy(template, OUTPUT_DOCX)
     doc = Document(OUTPUT_DOCX)
 
+    # Явная очистка хвостовых таблиц и паспортных блоков до заполнения.
+    clear_tail_tables(doc, table_indexes=[7, 8, 9, 10, 11], keep_rows=2)
+    clear_passport_blocks(doc)
+
     old_name = cfg.get("old_discipline", "").strip() or detect_old_discipline(doc)
     old_code = cfg.get("old_code", "")
     new_code = cfg.get("new_code", "")
@@ -2047,8 +2236,17 @@ def main(config_path: Optional[str] = None):
         print(f"\n❌ Consistency check failed: {e}")
         raise
 
-    doc.save(OUTPUT_DOCX)
-    print(f"\n✅ Сохранено: {OUTPUT_DOCX}")
+    is_terms_valid, terms_reason = post_validate_terms(doc, discipline, competencies)
+    _generation_log["post_terms_validation"] = {
+        "ok": is_terms_valid,
+        "reason": terms_reason,
+    }
+    if not is_terms_valid:
+        print(f"\n❌ Пост-валидация терминов не пройдена: {terms_reason}")
+        print("❌ Файл DOCX не сохранён из-за обнаружения чужих тем/компетенций")
+    else:
+        doc.save(OUTPUT_DOCX)
+        print(f"\n✅ Сохранено: {OUTPUT_DOCX}")
 
     # [C] Сохраняем лог генерации
     # [STEP-2] Добавляем счётчики JSON parse failures по секциям.
