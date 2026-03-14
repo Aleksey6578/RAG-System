@@ -1,33 +1,65 @@
 # RAG-System
 
-## Project Description
-RAG-System is a cutting-edge framework designed to assist in the development of AI-driven applications. This system integrates various components to streamline the process of building robust AI solutions.
+## Описание
+RAG-System — пайплайн для подготовки корпуса РПД, индексации в Qdrant и генерации итогового документа `.docx` с помощью LLM.
 
-## Features
-- **Easy Integration**: Seamlessly integrates with existing systems and APIs.
-- **Scalability**: Built to handle increased loads without compromising performance.
-- **User-Friendly**: Intuitive interface that minimizes the learning curve for new users.
-- **Extensive Documentation**: Comprehensive guides and examples to help you get started quickly.
+## Требования
 
-## Installation Instructions
-1. Clone the repository:
+### Python
+- Python 3.10+
+- `pip`
+
+### Сервисы
+1. **Qdrant** (по умолчанию `http://localhost:6333`) — векторная база для хранения чанков.
+2. **Ollama** (по умолчанию `http://localhost:11434`) — локальный inference-сервер для:
+   - эмбеддингов: модель **`bge-m3`** (используется в `load_qdrant.py`),
+   - генерации текста: модель из `GENERATION["model"]` в `rpd_generate.py`.
+
+Перед запуском убедитесь, что сервисы подняты, а нужные модели загружены в Ollama.
+
+## Установка
+1. Клонируйте репозиторий:
    ```bash
    git clone https://github.com/Aleksey6578/RAG-System.git
-   ```
-2. Navigate to the project directory:
-   ```bash
    cd RAG-System
    ```
-3. Install the required dependencies:
+2. Создайте и активируйте виртуальное окружение Python:
    ```bash
-   npm install
+   python -m venv .venv
+   source .venv/bin/activate
+   ```
+3. Установите зависимости:
+   ```bash
+   pip install -r requirements.txt
    ```
 
-## Usage Guide
-1. Start the server:
-   ```bash
-   npm start
-   ```
-2. Access the application in your web browser at `http://localhost:3000`.
+## Порядок запуска пайплайна
+Выполняйте шаги строго по порядку:
 
-For detailed usage instructions, please refer to the [Wiki](https://github.com/Aleksey6578/RAG-System/wiki).
+1. Конвертация исходных `.docx` в JSON:
+   ```bash
+   python converter.py
+   ```
+2. Очистка и нормализация текстов:
+   ```bash
+   python prepare_texts.py
+   ```
+3. Нарезка текста на чанки:
+   ```bash
+   python chunking.py
+   ```
+4. Загрузка чанков в Qdrant (с эмбеддингами через Ollama):
+   ```bash
+   python load_qdrant.py
+   ```
+5. Генерация итоговой РПД по конфигу:
+   ```bash
+   python rpd_generate.py config.json
+   ```
+
+## Выходные файлы
+- `rpd_json/` — JSON-представления документов РПД после конвертации.
+- `data_clean.jsonl` — очищенные и нормализованные тексты для дальнейшей обработки.
+- `chunks.jsonl` — чанки, подготовленные для индексирования в Qdrant.
+- `generation_log.json` — журнал генерации (промпты, промежуточные результаты, диагностика).
+- `output_rpd.docx` — финальный сгенерированный документ РПД.
