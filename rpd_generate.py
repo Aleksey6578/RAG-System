@@ -151,6 +151,195 @@ def clean(text: str) -> str:
     return "\n".join(l.strip() for l in text.split("\n") if l.strip()).strip()
 
 
+def _normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip()).lower()
+
+
+def _first_int(value: str) -> Optional[int]:
+    m = re.search(r"-?\d+", value or "")
+    return int(m.group(0)) if m else None
+
+
+def _canonical_attestation(value: str) -> str:
+    text = _normalize_text(value)
+    if "зач" in text and "диф" in text:
+        return "дифференцированный зачёт"
+    if "зач" in text:
+        return "зачёт"
+    if "экзам" in text:
+        return "экзамен"
+    return (value or "").strip() or "экзамен"
+
+
+def _apply_consistency_action(action_mode: str, issues: list[str], title: str, details: str):
+    msg = f"{title}: {details}"
+    if action_mode == "error":
+        issues.append(msg)
+        return
+    print(f"  🔧 {msg}")
+
+
+def validate_document_consistency(doc: Document, cfg: dict, hours: dict) -> dict:
+    """
+    Проверяет согласованность трудоёмкости/аттестации в документе.
+
+    consistency_mode:
+      - fix   (по умолчанию): конфликтующие ячейки принудительно исправляются;
+      - error: генерация завершается ошибкой с понятным сообщением.
+    """
+    ze = int(cfg.get("credits", 0))
+    hours_contact = int(hours.get("lecture", 0)) + int(hours.get("practice", 0)) + int(hours.get("lab", 0))
+    hours_self = int(hours.get("self", 0))
+    hours_total = int(cfg.get("hours") or (hours_contact + hours_self))
+    attestation = _canonical_attestation(cfg.get("exam_type", "экзамен"))
+    consistency_mode = str(cfg.get("consistency_mode", "fix")).strip().lower()
+    if consistency_mode not in {"fix", "error"}:
+        consistency_mode = "fix"
+
+    canonical = {
+        "ze": ze,
+        "hours_total": hours_total,
+        "hours_contact": hours_contact,
+        "hours_self": hours_self,
+        "attestation": attestation,
+    }
+    result = {
+        "canonical": canonical,
+        "mode": consistency_mode,
+        "fixes": [],
+        "errors": [],
+    }
+
+    # --- Раздел 3.1 ---
+    if len(doc.tables) <= 3:
+        result["errors"].append("Не найдена таблица Т3 для проверки раздела 3.1")
+    else:
+        t3 = doc.tables[3]
+        if len(t3.rows) > 4:
+            r31 = t3.rows[4]
+            expected_vals = {
+                1: canonical["ze"],
+                2: canonical["hours_total"],
+                3: canonical["hours_contact"],
+                4: canonical["hours_self"],
+            }
+            for idx, expected in expected_vals.items():
+                if idx >= len(r31.cells):
+                    continue
+                current = _first_int(r31.cells[idx].text)
+                if current != expected:
+                    _apply_consistency_action(
+                        consistency_mode,
+                        result["errors"],
+                        "Раздел 3.1",
+                        f"ячейка r5c{idx + 1}='{r31.cells[idx].text.strip()}' → '{expected}'"
+                    )
+                    if consistency_mode == "fix":
+                        set_cell_text(r31.cells[idx], str(expected))
+                        result["fixes"].append(f"Т3 r5c{idx + 1}: {current} → {expected}")
+
+            att_cell_idx = 5
+            if att_cell_idx < len(r31.cells):
+                current_att = _canonical_attestation(r31.cells[att_cell_idx].text)
+                if current_att != canonical["attestation"]:
+                    _apply_consistency_action(
+                        consistency_mode,
+                        result["errors"],
+                        "Раздел 3.1",
+                        f"форма аттестации '{r31.cells[att_cell_idx].text.strip()}' → '{canonical['attestation']}'"
+                    )
+                    if consistency_mode == "fix":
+                        set_cell_text(r31.cells[att_cell_idx], canonical["attestation"])
+                        result["fixes"].append(
+                            f"Т3 r5c{att_cell_idx + 1}: аттестация → {canonical['attestation']}"
+                        )
+
+        # --- ИТОГО ПО ДИСЦИПЛИНЕ ---
+        found_total_row = False
+        for r_idx, row in enumerate(t3.rows):
+            row_text = " ".join(c.text for c in row.cells)
+            if "итого" in _normalize_text(row_text):
+                found_total_row = True
+                for c_idx, cell in enumerate(row.cells):
+                    if _first_int(cell.text) is None:
+                        continue
+                    if c_idx == 2:
+                        current_total = _first_int(cell.text)
+                        if current_total != canonical["hours_total"]:
+                            _apply_consistency_action(
+                                consistency_mode,
+                                result["errors"],
+                                "ИТОГО ПО ДИСЦИПЛИНЕ",
+                                f"ячейка r{r_idx + 1}c{c_idx + 1}='{cell.text.strip()}' → '{canonical['hours_total']}'"
+                            )
+                            if consistency_mode == "fix":
+                                set_cell_text(cell, str(canonical["hours_total"]))
+                                result["fixes"].append(
+                                    f"Т3 r{r_idx + 1}c{c_idx + 1}: total → {canonical['hours_total']}"
+                                )
+                break
+        if not found_total_row:
+            result["errors"].append("Не найдена строка 'ИТОГО ПО ДИСЦИПЛИНЕ'/'ИТОГО' в таблице Т3")
+
+    # --- Единая форма аттестации во всех таблицах и итоговом листе ---
+    attestation_variants = [
+        "экзамен",
+        "зачет",
+        "зачёт",
+        "дифференцированный зачет",
+        "дифференцированный зачёт",
+    ]
+    for t_idx, table in enumerate(doc.tables):
+        for r_idx, row in enumerate(table.rows):
+            for c_idx, cell in enumerate(row.cells):
+                cell_text_norm = _normalize_text(cell.text)
+                if not cell_text_norm:
+                    continue
+                if any(v in cell_text_norm for v in attestation_variants):
+                    current_att = _canonical_attestation(cell.text)
+                    if current_att != canonical["attestation"]:
+                        _apply_consistency_action(
+                            consistency_mode,
+                            result["errors"],
+                            "Форма аттестации",
+                            f"Т{t_idx} r{r_idx + 1}c{c_idx + 1}: '{cell.text.strip()}' → '{canonical['attestation']}'"
+                        )
+                        if consistency_mode == "fix":
+                            set_cell_text(cell, canonical["attestation"])
+                            result["fixes"].append(
+                                f"Т{t_idx} r{r_idx + 1}c{c_idx + 1}: аттестация → {canonical['attestation']}"
+                            )
+
+    for p_idx, paragraph in enumerate(doc.paragraphs):
+        p_text_norm = _normalize_text(paragraph.text)
+        if not p_text_norm:
+            continue
+        if "форма" in p_text_norm and "аттест" in p_text_norm:
+            current_att = _canonical_attestation(paragraph.text)
+            if current_att != canonical["attestation"]:
+                _apply_consistency_action(
+                    consistency_mode,
+                    result["errors"],
+                    "Форма аттестации (итоговый лист)",
+                    f"параграф #{p_idx + 1}: '{paragraph.text.strip()}'"
+                )
+                if consistency_mode == "fix":
+                    replaced = re.sub(
+                        r"(экзамен|зач[её]т|дифференцированный\s+зач[её]т)",
+                        canonical["attestation"],
+                        paragraph.text,
+                        flags=re.IGNORECASE,
+                    )
+                    paragraph.text = replaced
+                    result["fixes"].append(f"Параграф #{p_idx + 1}: аттестация → {canonical['attestation']}")
+
+    if consistency_mode == "error" and result["errors"]:
+        error_text = "\n".join(f"- {e}" for e in result["errors"])
+        raise ValueError("Consistency check failed:\n" + error_text)
+
+    return result
+
+
 def get_embedding(text: str):
     if text in EMBED_CACHE:
         return EMBED_CACHE[text]
@@ -1843,6 +2032,20 @@ def main(config_path: Optional[str] = None):
             print(f"  ✅ {name}")
         except Exception as e:
             print(f"  ⚠️  {name}: {e}")
+
+    try:
+        consistency_check = validate_document_consistency(doc, cfg, hours)
+        _generation_log["consistency_check"] = consistency_check
+        if consistency_check.get("fixes"):
+            print("\n🔧 Consistency check: внесены исправления")
+            for item in consistency_check["fixes"]:
+                print(f"  - {item}")
+        else:
+            print("\n✅ Consistency check: расхождений не найдено")
+    except Exception as e:
+        _generation_log["consistency_check"] = {"errors": [str(e)], "fixes": []}
+        print(f"\n❌ Consistency check failed: {e}")
+        raise
 
     doc.save(OUTPUT_DOCX)
     print(f"\n✅ Сохранено: {OUTPUT_DOCX}")
