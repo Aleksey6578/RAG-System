@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+qdrant-client
+sentence-transformers
+transformers
+torch
+accelerate
+numpy
+requests
