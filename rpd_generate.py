@@ -34,6 +34,7 @@ import os
 import shutil
 import time
 import hashlib
+import inspect
 import requests
 from math import sqrt
 from copy import deepcopy
@@ -2728,6 +2729,12 @@ def gen_with_json_retry(label: str, discipline: str, prompt: str,
     """
     _json_parse_failures.setdefault(label, 0)
 
+    parser_json_params = inspect.signature(parser_json).parameters
+    parser_accepts_debug = (
+        "debug" in parser_json_params
+        or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in parser_json_params.values())
+    )
+
     min_items_required = 6 if label in {"lab_works", "practice"} else 3
 
     def _is_valid_list_output(value) -> bool:
@@ -2745,7 +2752,7 @@ def gen_with_json_retry(label: str, discipline: str, prompt: str,
 
     def _parse_with_repair_debug(src_raw: str):
         parse_debug: dict = {}
-        parsed = parser_json(src_raw, debug=parse_debug)
+        parsed = parser_json(src_raw, debug=parse_debug) if parser_accepts_debug else parser_json(src_raw)
         if label in _generation_log:
             if parse_debug.get("raw_invalid_json"):
                 _generation_log[label]["raw_invalid_json"] = parse_debug["raw_invalid_json"]
