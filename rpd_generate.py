@@ -1106,6 +1106,135 @@ def collect_doc_terms(doc: Document) -> str:
     return _normalize_text("\n".join(chunks))
 
 
+OCR_LLM_CORRECTIONS = {
+    "bibliotecок": "библиотек",
+    "bibliotec": "библиотек",
+    "llm-модeль": "llm-модель",
+    "интeллект": "интеллект",
+    "компетeнц": "компетенц",
+}
+
+_MIXED_SCRIPT_MAP = str.maketrans({
+    "A": "А", "B": "В", "C": "С", "E": "Е", "H": "Н", "K": "К", "M": "М", "O": "О",
+    "P": "Р", "T": "Т", "X": "Х", "Y": "У", "a": "а", "c": "с", "e": "е", "o": "о",
+    "p": "р", "x": "х", "y": "у", "k": "к", "m": "м", "h": "н", "b": "Ь",
+})
+
+
+def _fix_mixed_script_word(match: re.Match) -> str:
+    token = match.group(0)
+    return token.translate(_MIXED_SCRIPT_MAP)
+
+
+def _normalize_text_postprocess(text: str) -> tuple[str, dict]:
+    stats = {
+        "spaces": 0,
+        "punctuation": 0,
+        "ocr_llm": 0,
+        "mixed_script": 0,
+    }
+    if not text:
+        return text, stats
+
+    new = text
+
+    # OCR/LLM-ошибки словарём.
+    for wrong, right in OCR_LLM_CORRECTIONS.items():
+        hits = len(re.findall(re.escape(wrong), new, flags=re.IGNORECASE))
+        if hits:
+            new = re.sub(re.escape(wrong), right, new, flags=re.IGNORECASE)
+            stats["ocr_llm"] += hits
+
+    # Смешение кириллицы/латиницы внутри слова.
+    mixed_pat = re.compile(r"(?i)(?=[A-Za-zА-Яа-я]*[A-Za-z])(?=[A-Za-zА-Яа-я]*[А-Яа-я])[A-Za-zА-Яа-я]{3,}")
+    new, mixed_count = mixed_pat.subn(_fix_mixed_script_word, new)
+    stats["mixed_script"] += mixed_count
+
+    # Нормализация пробелов.
+    new, c1 = re.subn(r"[ \t]{2,}", " ", new)
+    new, c2 = re.subn(r"\s+([,.;:!?])", r"\1", new)
+    new, c3 = re.subn(r"([,;:!?])(?!\s|$)", r"\1 ", new)
+    stats["spaces"] += c1 + c2 + c3
+
+    # Нормализация пунктуации и типовых конструкций.
+    new, c4 = re.subn(r"(?i)профиль\s+[\"“](.+?)[\"”]", r"профиль «\1»", new)
+    new, c5 = re.subn(r"\((\d+)\s*час\)", r"(\1 часов)", new)
+    new, c6 = re.subn(r"\.{2,}", ".", new)
+    new, c7 = re.subn(r"[.;]{2,}", ";", new)
+    new, c8 = re.subn(r"\.\s*;|;\s*\.", ".", new)
+    stats["punctuation"] += c4 + c5 + c6 + c7 + c8
+
+    return new.strip(), stats
+
+
+def _has_midphrase_ellipsis(text: str) -> bool:
+    if not text:
+        return False
+    patterns = [
+        r"\b[А-Яа-яA-Za-z]{2,}…(?=\s+[А-Яа-яA-Za-z]{2,})",
+        r"(?<=\s)[А-Яа-яA-Za-z]…(?=\s+[А-Яа-яA-Za-z]{2,})",
+    ]
+    return any(re.search(p, text) for p in patterns)
+
+
+def _regenerate_cell_text(cell_text: str, discipline: str) -> str:
+    prompt = (
+        "Восстанови повреждённый фрагмент текста РПД. "
+        "Исправь обрезанные слова с многоточием в середине фразы, "
+        "не меняя смысл и деловой стиль. Верни только исправленный текст без комментариев.\n\n"
+        f"Дисциплина: {discipline}\n"
+        f"Текст: {cell_text}"
+    )
+    regenerated = llm(prompt, max_tokens=220, temperature=0.0)
+    if regenerated.startswith("[Ошибка"):
+        return cell_text.replace("…", "")
+    return regenerated.strip() or cell_text.replace("…", "")
+
+
+def run_postprocessing(doc: Document, discipline: str) -> dict:
+    """Постобработка текста DOCX перед сохранением."""
+    report = {
+        "spaces": 0,
+        "punctuation": 0,
+        "ocr_llm": 0,
+        "mixed_script": 0,
+        "ellipsis_detected_cells": 0,
+        "regenerated_cells": 0,
+    }
+
+    paragraphs = list(doc.paragraphs)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                paragraphs.extend(cell.paragraphs)
+
+    for para in paragraphs:
+        for run in para.runs:
+            normalized, stats = _normalize_text_postprocess(run.text)
+            if normalized != run.text:
+                run.text = normalized
+            for key in ("spaces", "punctuation", "ocr_llm", "mixed_script"):
+                report[key] += stats[key]
+
+    # Регенерация только затронутых ячеек таблиц.
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                cell_text = cell.text.strip()
+                if not _has_midphrase_ellipsis(cell_text):
+                    continue
+                report["ellipsis_detected_cells"] += 1
+                regenerated = _regenerate_cell_text(cell_text, discipline)
+                normalized, stats = _normalize_text_postprocess(regenerated)
+                if normalized != cell_text:
+                    set_cell_text(cell, normalized)
+                    report["regenerated_cells"] += 1
+                for key in ("spaces", "punctuation", "ocr_llm", "mixed_script"):
+                    report[key] += stats[key]
+
+    return report
+
+
 def _contains_topic_phrase(text: str, phrase: str) -> bool:
     """Проверяет совпадение темы как отдельного слова/фразы, не как подстроки."""
     pattern = rf"(?<!\w){re.escape(phrase)}(?!\w)"
@@ -2765,9 +2894,11 @@ def main(config_path: Optional[str] = None):
         raise
 
     is_terms_valid, terms_reason = post_validate_terms(doc, discipline, competencies)
+    postprocess_report = run_postprocessing(doc, discipline)
     _generation_log["post_terms_validation"] = {
         "ok": is_terms_valid,
         "reason": terms_reason,
+        "autocorrections": postprocess_report,
     }
     if not is_terms_valid:
         print(f"\n❌ Пост-валидация терминов не пройдена: {terms_reason}")
