@@ -224,6 +224,58 @@ _generation_log: dict = {}
 _json_parse_failures: dict = {}
 
 
+def _clean_json_artifacts(raw_text: str) -> str:
+    """Удаляет типовые артефакты LLM-ответа перед JSON-парсингом."""
+    text = (raw_text or "").strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```$", "", text)
+    text = re.sub(r"^\s*\.\.\.\s*$", "", text, flags=re.MULTILINE)
+    text = text.replace("\u2026", "")
+    text = re.sub(r"//.*?$", "", text, flags=re.MULTILINE)
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    return text.strip()
+
+
+def _extract_json_candidate(raw_text: str) -> str:
+    """Выделяет JSON-массив/объект из ответа после очистки артефактов."""
+    cleaned = _clean_json_artifacts(raw_text)
+    m_array = re.search(r"\[.*\]", cleaned, re.S)
+    if m_array:
+        return m_array.group().strip()
+    m_object = re.search(r"\{.*\}", cleaned, re.S)
+    if m_object:
+        return m_object.group().strip()
+    return cleaned
+
+
+def _repair_json_with_llm(raw_json: str) -> str:
+    """Промежуточный repair-проход: исправляет только JSON, без изменения смысла."""
+    prompt = (
+        "Исправь только JSON, без изменения смысла и без добавления новых данных.\n"
+        "Требования:\n"
+        "- верни только валидный JSON (без markdown, комментариев и пояснений);\n"
+        "- сохрани исходную структуру и значения максимально дословно;\n"
+        "- убери только синтаксические ошибки, trailing commas и мусорные символы.\n\n"
+        "Невалидный JSON:\n"
+        f"{raw_json}"
+    )
+    repaired = llm(prompt, max_tokens=900, json_mode=False, temperature=0.0)
+    return _extract_json_candidate(repaired)
+
+
+def _record_parse_debug(debug: Optional[dict], invalid_json: str = "", repaired_json: str = "",
+                        schema_error: str = ""):
+    if debug is None:
+        return
+    if invalid_json:
+        debug["raw_invalid_json"] = invalid_json
+    if repaired_json:
+        debug["repaired_json"] = repaired_json
+    if schema_error:
+        debug["schema_error"] = schema_error
+
+
 # ---------------------------------------------------------------------------
 # Утилиты
 # ---------------------------------------------------------------------------
@@ -964,27 +1016,45 @@ def post_validate_terms(doc: Document, discipline: str, competencies: list[tuple
 # [A] JSON-парсеры с fallback на regex
 # ---------------------------------------------------------------------------
 
-def parse_competencies_json(text: str) -> list | None:
+def parse_competencies_json(text: str, debug: Optional[dict] = None) -> list | None:
     """
     [A] Пытается разобрать JSON-ответ LLM для компетенций.
     Ожидаемый формат: [{"code": "УК-1", "desc": "Способен..."}]
     """
     # [БАГ 8 ИСПРАВЛЕНО]: нежадный r"\[.*?\]" → жадный r"\[.*\]"
-    m = re.search(r"\[.*\]", text, re.S)
-    if not m:
+    candidate = _extract_json_candidate(text)
+    if "[" not in candidate:
         return None
     try:
-        data = json.loads(m.group())
-        if not isinstance(data, list):
-            return None
-        result = [
-            (str(d.get("code", "")), str(d.get("desc", "")))
-            for d in data
-            if isinstance(d, dict) and d.get("code") and d.get("desc")
-        ]
-        return result if result else None
+        data = json.loads(candidate)
     except (json.JSONDecodeError, TypeError):
+        _record_parse_debug(debug, invalid_json=candidate)
+        repaired_json = _repair_json_with_llm(candidate)
+        _record_parse_debug(debug, repaired_json=repaired_json)
+        try:
+            data = json.loads(repaired_json)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    if not isinstance(data, list):
+        _record_parse_debug(debug, schema_error="expected_json_array")
         return None
+
+    result = [
+        (str(d.get("code", "")), str(d.get("desc", "")))
+        for d in data
+        if isinstance(d, dict) and d.get("code") and d.get("desc")
+    ]
+    if len(result) < 3:
+        _record_parse_debug(debug, schema_error="min_items_violation")
+        return None
+
+    codes = [code.strip().upper() for code, _ in result]
+    if len(set(codes)) != len(codes):
+        _record_parse_debug(debug, schema_error="duplicate_competency_codes")
+        return None
+
+    return result
 
 
 def parse_competencies(text: str, codes: list = None) -> list:
@@ -1031,34 +1101,55 @@ def parse_competencies(text: str, codes: list = None) -> list:
     ]
 
 
-def parse_outcomes_json(text: str) -> list | None:
+def parse_outcomes_json(text: str, debug: Optional[dict] = None) -> list | None:
     """
     [A] Пытается разобрать JSON-ответ LLM для результатов обучения.
     Ожидаемые форматы:
       1) Legacy: [{"type": "З", "text": "..."}, ...]
       2) По компетенциям: [{"code": "УК-1", "type": "З", "text": "..."}, ...]
     """
-    m = re.search(r"\[.*\]", text, re.S)
-    if not m:
+    candidate = _extract_json_candidate(text)
+    if "[" not in candidate:
         return None
     try:
-        data = json.loads(m.group())
-        if not isinstance(data, list):
-            return None
-        result = []
-        for d in data:
-            if not isinstance(d, dict):
-                continue
-            otype = str(d.get("type", ""))
-            text_value = str(d.get("text", ""))
-            if otype not in ("З", "У", "В") or not text_value:
-                continue
-
-            code = str(d.get("code", "")).strip()
-            result.append((otype, text_value, code) if code else (otype, text_value))
-        return result if len(result) >= 3 else None
+        data = json.loads(candidate)
     except (json.JSONDecodeError, TypeError):
+        _record_parse_debug(debug, invalid_json=candidate)
+        repaired_json = _repair_json_with_llm(candidate)
+        _record_parse_debug(debug, repaired_json=repaired_json)
+        try:
+            data = json.loads(repaired_json)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    if not isinstance(data, list):
+        _record_parse_debug(debug, schema_error="expected_json_array")
         return None
+
+    result = []
+    for d in data:
+        if not isinstance(d, dict):
+            continue
+        otype = str(d.get("type", ""))
+        text_value = str(d.get("text", ""))
+        if otype not in ("З", "У", "В") or not text_value:
+            continue
+
+        code = str(d.get("code", "")).strip()
+        result.append((otype, text_value, code) if code else (otype, text_value))
+
+    if len(result) < 3:
+        _record_parse_debug(debug, schema_error="min_items_violation")
+        return None
+
+    outcome_signatures = [
+        f"{item[0]}::{item[1].strip().lower()}::{(item[2] if len(item) > 2 else '').strip().upper()}"
+        for item in result
+    ]
+    if len(set(outcome_signatures)) != len(outcome_signatures):
+        _record_parse_debug(debug, schema_error="duplicate_outcomes")
+        return None
+    return result
 
 
 def parse_outcomes(text: str) -> list:
@@ -1145,29 +1236,46 @@ def parse_outcomes(text: str) -> list:
     ]
 
 
-def parse_topics_json(text: str) -> list | None:
+def parse_topics_json(text: str, debug: Optional[dict] = None) -> list | None:
     """
     [A] Пытается разобрать JSON-ответ LLM для тематического плана.
     Ожидаемый формат: [{"type": "section"|"topic", "label": "Раздел 1", "name": "..."}]
     """
-    m = re.search(r"\[.*\]", text, re.S)
-    if not m:
+    candidate = _extract_json_candidate(text)
+    if "[" not in candidate:
         return None
     try:
-        data = json.loads(m.group())
-        if not isinstance(data, list):
-            return None
-        topics = []
-        for d in data:
-            if not isinstance(d, dict):
-                continue
-            label = str(d.get("label", "")).strip()
-            name  = str(d.get("name", "")).strip()
-            if label and name:
-                topics.append(f"{label}. {name}")
-        return topics if topics else None
+        data = json.loads(candidate)
     except (json.JSONDecodeError, TypeError):
+        _record_parse_debug(debug, invalid_json=candidate)
+        repaired_json = _repair_json_with_llm(candidate)
+        _record_parse_debug(debug, repaired_json=repaired_json)
+        try:
+            data = json.loads(repaired_json)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    if not isinstance(data, list):
+        _record_parse_debug(debug, schema_error="expected_json_array")
         return None
+
+    topics = []
+    for d in data:
+        if not isinstance(d, dict):
+            continue
+        label = str(d.get("label", "")).strip()
+        name = str(d.get("name", "")).strip()
+        if label and name:
+            topics.append(f"{label}. {name}")
+
+    if len(topics) < 3:
+        _record_parse_debug(debug, schema_error="min_items_violation")
+        return None
+    topic_keys = [t.lower() for t in topics]
+    if len(set(topic_keys)) != len(topic_keys):
+        _record_parse_debug(debug, schema_error="duplicate_topic_titles")
+        return None
+    return topics
 
 
 def parse_topics(text: str) -> list:
@@ -1218,7 +1326,7 @@ def parse_topics(text: str) -> list:
     ]
 
 
-def parse_list_json(text: str, min_items: int = 3) -> list | None:
+def parse_list_json(text: str, min_items: int = 3, debug: Optional[dict] = None) -> list | None:
     """
     [A] Пытается разобрать JSON-ответ LLM для списка ЛР/ПЗ.
     Ожидаемый формат: [{"title": "Реализация алгоритма..."}, ...]
@@ -1230,18 +1338,34 @@ def parse_list_json(text: str, min_items: int = 3) -> list | None:
     (4 из 6 ЛР) как "валидный" JSON — retry не срабатывал, дефолт не подставлялся.
     Теперь caller передаёт min_items=6, и неполный список возвращает None → retry.
     """
-    m = re.search(r"\[.*\]", text, re.S)
-    if not m:
+    candidate = _extract_json_candidate(text)
+    if "[" not in candidate:
         return None
     try:
-        data = json.loads(m.group())
-        if not isinstance(data, list):
-            return None
-        result = [str(d.get("title", "")).strip() for d in data
-                  if isinstance(d, dict) and d.get("title")]
-        return result if len(result) >= min_items else None
+        data = json.loads(candidate)
     except (json.JSONDecodeError, TypeError):
+        _record_parse_debug(debug, invalid_json=candidate)
+        repaired_json = _repair_json_with_llm(candidate)
+        _record_parse_debug(debug, repaired_json=repaired_json)
+        try:
+            data = json.loads(repaired_json)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    if not isinstance(data, list):
+        _record_parse_debug(debug, schema_error="expected_json_array")
         return None
+
+    result = [str(d.get("title", "")).strip() for d in data
+              if isinstance(d, dict) and d.get("title")]
+    if len(result) < min_items:
+        _record_parse_debug(debug, schema_error="min_items_violation")
+        return None
+    lowered = [r.lower() for r in result]
+    if len(set(lowered)) != len(lowered):
+        _record_parse_debug(debug, schema_error="duplicate_titles")
+        return None
+    return result
 
 
 def _default_list_titles(list_kind: str = "lab_works") -> list[str]:
@@ -1316,22 +1440,38 @@ def parse_list(text: str, discipline: str = "", min_items: int = 3,
 # Библиография — генерация и заполнение таблиц
 # ---------------------------------------------------------------------------
 
-def parse_bibliography_json(text: str) -> list | None:
+def parse_bibliography_json(text: str, debug: Optional[dict] = None) -> list | None:
     """
     Парсит JSON-ответ LLM для библиографических записей.
     Ожидаемые поля: type/purpose/desc/url/coeff.
     """
-    m = re.search(r"\[.*\]", text, re.S)
-    if not m:
+    candidate = _extract_json_candidate(text)
+    if "[" not in candidate:
         return None
     try:
-        data = json.loads(m.group())
-        if not isinstance(data, list):
-            return None
-        result = [d for d in data if isinstance(d, dict) and d.get("desc")]
-        return result if result else None
+        data = json.loads(candidate)
     except (json.JSONDecodeError, TypeError):
+        _record_parse_debug(debug, invalid_json=candidate)
+        repaired_json = _repair_json_with_llm(candidate)
+        _record_parse_debug(debug, repaired_json=repaired_json)
+        try:
+            data = json.loads(repaired_json)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    if not isinstance(data, list):
+        _record_parse_debug(debug, schema_error="expected_json_array")
         return None
+
+    result = [d for d in data if isinstance(d, dict) and d.get("desc")]
+    if len(result) < 1:
+        _record_parse_debug(debug, schema_error="min_items_violation")
+        return None
+    desc_keys = [str(d.get("desc", "")).strip().lower() for d in result]
+    if len(set(desc_keys)) != len(desc_keys):
+        _record_parse_debug(debug, schema_error="duplicate_titles")
+        return None
+    return result
 
 
 def _normalize_for_match(value: str) -> str:
@@ -2166,6 +2306,18 @@ def gen_with_json_retry(label: str, discipline: str, prompt: str,
             _generation_log[label]["fallback_applied"] = True
         return src_raw, parser_fallback(src_raw)
 
+    def _parse_with_repair_debug(src_raw: str):
+        parse_debug: dict = {}
+        parsed = parser_json(src_raw, debug=parse_debug)
+        if label in _generation_log:
+            if parse_debug.get("raw_invalid_json"):
+                _generation_log[label]["raw_invalid_json"] = parse_debug["raw_invalid_json"]
+            if parse_debug.get("repaired_json"):
+                _generation_log[label]["repaired_json"] = parse_debug["repaired_json"]
+            if parse_debug.get("schema_error"):
+                _generation_log[label]["schema_error"] = parse_debug["schema_error"]
+        return parsed
+
     raw = gen(
         label, discipline, prompt,
         direction=direction, level=level,
@@ -2173,7 +2325,7 @@ def gen_with_json_retry(label: str, discipline: str, prompt: str,
         temperature=0.2,
         **extra,
     )
-    result = parser_json(raw)
+    result = _parse_with_repair_debug(raw)
     if result is not None and _is_valid_list_output(result):
         return raw, result
     if result is not None and not _is_valid_list_output(result):
@@ -2196,7 +2348,7 @@ def gen_with_json_retry(label: str, discipline: str, prompt: str,
             temperature=retry_temperature,
             **extra,
         )
-        result = parser_json(raw)
+        result = _parse_with_repair_debug(raw)
         if result is not None and _is_valid_list_output(result):
             return raw, result
         if result is not None and not _is_valid_list_output(result):
