@@ -172,7 +172,7 @@ def upsert_batch(ids: list, vectors: list, payloads: list) -> tuple[bool, list]:
     return True, []
 
 
-def upsert_batch_with_retry(ids: list, vectors: list, payloads: list) -> bool:
+def upsert_batch_with_retry(ids: list, vectors: list, payloads: list) -> tuple[bool, int, int]:
     """
     [O] Retry для upsert_batch при ошибках Qdrant (503, timeout и т.п.).
     [БАГ 11 ИСПРАВЛЕНО]: обрабатываем failed points из HTTP 206 — повторяем
@@ -184,7 +184,7 @@ def upsert_batch_with_retry(ids: list, vectors: list, payloads: list) -> bool:
     for attempt in range(1, RETRY_COUNT + 1):
         ok, failed_ids = upsert_batch(ids, vectors, payloads)
         if ok and not failed_ids:
-            return True
+            return True, len(ids), 0
         if ok and failed_ids:
             # Частичная ошибка: повторяем только failed points
             print(f"  Retry {len(failed_ids)} failed points (попытка {attempt}/{RETRY_COUNT})...")
@@ -199,7 +199,12 @@ def upsert_batch_with_retry(ids: list, vectors: list, payloads: list) -> bool:
             ok2, still_failed = upsert_batch(ids_r, vectors_r, payloads_r)
             if still_failed:
                 print(f"  ❌ {len(still_failed)} точек так и не загружены: {still_failed[:5]}")
-            return ok2
+                return False, len(ids) - len(still_failed), len(still_failed)
+            if not ok2:
+                # Первый вызов уже загрузил точки вне failed_ids,
+                # повторный upsert провалился для всего retry-поднабора.
+                return False, len(ids) - len(ids_r), len(ids_r)
+            return True, len(ids), 0
         # Полная ошибка — retry всего батча
         if attempt < RETRY_COUNT:
             print(f"  Retry upsert {attempt}/{RETRY_COUNT}... ждём {delay:.0f}с")
@@ -207,7 +212,7 @@ def upsert_batch_with_retry(ids: list, vectors: list, payloads: list) -> bool:
             delay *= 2
 
     print(f"  ❌ Батч из {len(ids)} точек не загружен после {RETRY_COUNT} попыток")
-    return False
+    return False, 0, len(ids)
 
 
 # ---------------------------------------------------------------------------
@@ -295,7 +300,8 @@ def main(append_mode: bool = False):
         print(f"  Коллекция '{COLLECTION}' существует — добавляем новые точки.")
 
     # Загрузка батчами с retry
-    uploaded = 0
+    uploaded_ok = 0
+    uploaded_failed = 0
     i = 0
 
     while i < len(results):
@@ -327,13 +333,24 @@ def main(append_mode: bool = False):
                 "embedding_model": EMBED_MODEL,
             })
 
-        if upsert_batch_with_retry(ids, vectors, payloads):  # [O]
-            uploaded += len(batch)
-            print(f"  Загружено: {uploaded}/{len(results)}")
+        ok, batch_uploaded_ok, batch_uploaded_failed = upsert_batch_with_retry(ids, vectors, payloads)  # [O]
+        uploaded_ok += batch_uploaded_ok
+        uploaded_failed += batch_uploaded_failed
+
+        if ok:
+            print(f"  Загружено: {uploaded_ok}/{len(results)}")
+        else:
+            print(
+                f"  ⚠️  Частичная загрузка батча: +{batch_uploaded_ok} ok, "
+                f"+{batch_uploaded_failed} failed"
+            )
 
         i += UPSERT_BATCH
 
-    print(f"\nГотово. Загружено: {uploaded}, пропущено: {skipped}")
+    print(
+        f"\nГотово. uploaded_ok={uploaded_ok}, "
+        f"uploaded_failed={uploaded_failed}, skipped_embedding={skipped}"
+    )
 
 
 if __name__ == "__main__":
