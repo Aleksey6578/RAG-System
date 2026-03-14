@@ -319,6 +319,7 @@ def main(append_mode: bool = False):
                 "text":          ch["text"],
                 # [S] section_type на верхнем уровне для прямой фильтрации
                 "section_type":  meta.get("section_type", "other"),
+                "priority":      ch.get("priority", meta.get("priority", "normal")),
                 "metadata":      meta,
                 # [B] Доменные поля для фильтрации по направлению/уровню
                 "direction":     ch.get("direction", ""),

@@ -69,21 +69,41 @@ MAX_WORDS = MAX_TOKENS
 OVERLAP   = OVERLAP_TOKENS
 MIN_WORDS = MIN_TOKENS
 
-MAX_CHUNKS_PER_SECTION_TYPE_DEFAULT = 25  # базовый лимит для большинства секций
-MAX_CHUNKS_PER_SECTION_TYPE = {
-    "default": MAX_CHUNKS_PER_SECTION_TYPE_DEFAULT,
-    # Для ФОС требуется более широкий охват: ограничение 25 приводило
-    # к потере значимой части оценочных материалов в крупных РПД.
-    "assessment": 60,
+SECTION_TYPE_SHARE_LIMITS = {
+    # Доли от ориентировочного объёма документа в чанках.
+    # Оставляем более широкий бюджет для assessment.
+    "default": 0.35,
+    "assessment": 0.55,
 }
+MIN_CHUNKS_PER_SECTION_TYPE = 6
+LONG_DOC_SOFT_LIMIT_CHUNKS = 90
 
 
-def get_section_type_limit(section_type: str) -> int:
-    """Возвращает лимит чанков для конкретного типа раздела."""
-    return MAX_CHUNKS_PER_SECTION_TYPE.get(
+def get_adaptive_section_limit(section_type: str, doc_chunk_budget: int) -> int:
+    """Адаптивный лимит по типу секции: доля от объёма документа."""
+    share = SECTION_TYPE_SHARE_LIMITS.get(
         section_type,
-        MAX_CHUNKS_PER_SECTION_TYPE["default"]
+        SECTION_TYPE_SHARE_LIMITS["default"]
     )
+    return max(MIN_CHUNKS_PER_SECTION_TYPE, int(round(doc_chunk_budget * share)))
+
+
+def estimate_doc_chunk_budgets(records: list[dict]) -> dict[str, dict]:
+    """Оценивает объём документа и базовый бюджет чанков по source."""
+    source_tokens: dict[str, int] = {}
+    for r in records:
+        src = r["source"]
+        source_tokens[src] = source_tokens.get(src, 0) + count_tokens(r.get("text", ""))
+
+    out: dict[str, dict] = {}
+    for src, tok_total in source_tokens.items():
+        doc_chunk_budget = max(1, int(round(tok_total / MAX_TOKENS)))
+        out[src] = {
+            "token_total": tok_total,
+            "doc_chunk_budget": doc_chunk_budget,
+            "soft_limit": doc_chunk_budget >= LONG_DOC_SOFT_LIMIT_CHUNKS,
+        }
+    return out
 
 NOISE_TITLES = {
     "УТВЕРЖДАЮ", "СОГЛАСОВАНО", "СВЕДЕНИЯ",
@@ -346,10 +366,13 @@ def main():
     records = group_short_chunks(raw_records)
     print(f"Записей после группировки: {len(records)} (было {len(raw_records)})")
 
+    doc_budgets = estimate_doc_chunk_budgets(records)
+
     chunks_out:      list[dict] = []
     global_chunk_id: int        = 0
     seen_hashes:     set        = set()
     stats_source:    dict       = {}
+    dropped_by_stype: Counter   = Counter()
     dup_count = 0
 
     for record in records:
@@ -369,7 +392,14 @@ def main():
         department = record.get("department", "")
 
         stats_source.setdefault(source, {
-            "records": 0, "chunks": 0, "dups": 0, "by_stype": {}
+            "records": 0,
+            "chunks": 0,
+            "dups": 0,
+            "by_stype": {},
+            "dropped_by_stype": Counter(),
+            "soft_limited": 0,
+            "doc_chunk_budget": doc_budgets[source]["doc_chunk_budget"],
+            "soft_limit": doc_budgets[source]["soft_limit"],
         })
         stats_source[source]["records"] += 1
 
@@ -381,16 +411,12 @@ def main():
             else classify_section(section_title)
         )
 
-        stype_limit = get_section_type_limit(stype_for_limit)
         stype_count = stats_source[source]["by_stype"].get(stype_for_limit, 0)
-        if stype_count >= stype_limit:
-            # [БАГ 9 ИСПРАВЛЕНО]: предупреждение при срабатывании лимита
-            print(
-                f"  ⚠️  [{source}] лимит {stype_limit} чанков "
-                f"для типа '{stype_for_limit}' достигнут — блок пропущен: "
-                f"{section_title!r:.60}"
-            )
-            continue
+        stype_limit = get_adaptive_section_limit(
+            stype_for_limit,
+            stats_source[source]["doc_chunk_budget"],
+        )
+        is_soft_limit = stats_source[source]["soft_limit"]
 
         doc_pos_start = stats_source[source]["chunks"]
 
@@ -414,6 +440,17 @@ def main():
                 clean_chunk, section_title, source, block_stype
             )
 
+            over_limit = stype_count >= stype_limit
+            if over_limit and not is_soft_limit:
+                dropped_by_stype[stype_for_limit] += 1
+                stats_source[source]["dropped_by_stype"][stype_for_limit] += 1
+                continue
+
+            priority = "normal"
+            if over_limit and is_soft_limit:
+                priority = "low"
+                stats_source[source]["soft_limited"] += 1
+
             chunks_out.append({
                 "id":              global_chunk_id,
                 "doc_id":          doc_id,
@@ -430,35 +467,41 @@ def main():
                 "direction":       direction,
                 "level":           level,
                 "department":      department,
+                "priority":        priority,
                 # [M] Разделённые metadata
                 "section_metadata": sec_meta,
                 "chunk_metadata":   chunk_meta,
                 # Обратная совместимость с load_qdrant.py
-                "metadata": {**chunk_meta, "section_type": sec_meta["section_type"]},
+                "metadata": {**chunk_meta, "section_type": sec_meta["section_type"], "priority": priority},
             })
             global_chunk_id += 1
             stats_source[source]["chunks"] += 1
             stype_count += 1
             stats_source[source]["by_stype"][stype_for_limit] = stype_count
 
-            if stype_count >= stype_limit:
-                break
-
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         for c in chunks_out:
             f.write(json.dumps(c, ensure_ascii=False) + "\n")
 
     print(f"Создано уникальных чанков: {len(chunks_out)} (дублей: {dup_count})")
-
-    print(f"\n{'Источник':<40} {'Зап.':>5} {'Чанков':>7} {'Дублей':>7}")
-    print("-" * 62)
+    print(f"\n{'Источник':<40} {'Зап.':>5} {'Чанков':>7} {'Дублей':>7} {'Soft':>6}")
+    print("-" * 70)
     for src, s in sorted(stats_source.items()):
-        print(f"{src:<40} {s['records']:>5} {s['chunks']:>7} {s['dups']:>7}")
+        print(
+            f"{src:<40} {s['records']:>5} {s['chunks']:>7} {s['dups']:>7} {s['soft_limited']:>6}"
+        )
 
     type_counts = Counter(c["metadata"]["section_type"] for c in chunks_out)
     print(f"\nПо типу раздела:")
     for t, n in type_counts.most_common():
         print(f"  {t:<20}: {n}")
+
+    print("\nОтброшено чанков по section_type (hard limit):")
+    if dropped_by_stype:
+        for stype, n in dropped_by_stype.most_common():
+            print(f"  {stype:<20}: {n}")
+    else:
+        print("  нет")
 
     if chunks_out:
         all_tcs = [c["chunk_metadata"]["token_count"] for c in chunks_out]
