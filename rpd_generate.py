@@ -50,7 +50,14 @@ OLLAMA = {
     "embed_model":  "bge-m3",
     "llm_model":    "qwen2.5:3b",
 }
-GENERATION = {"top_k": 5, "min_score": 0.45}
+GENERATION = {
+    "top_k": 5,
+    "min_score": 0.45,
+    # [STEP-3] retrieve→rerank: сначала берём больше кандидатов,
+    # затем оставляем top_k после переранжирования и source-diversity.
+    "retrieve_top_k": 20,
+    "max_chunks_per_source": 2,
+}
 
 # [J] Максимальная длина контекста, передаваемого в LLM (символы).
 # Замечание: "Нет ограничения контекста — контекст может превышать окно модели".
@@ -87,6 +94,22 @@ def _rank_score(hit: dict) -> float:
     weight = PRIORITY_WEIGHTS.get(priority, PRIORITY_WEIGHTS["normal"])
     return raw_score * weight
 
+
+def _apply_source_diversity(hits: list[dict], max_per_source: int) -> list[dict]:
+    """Ограничивает число чанков из одного source после rerank."""
+    if max_per_source <= 0:
+        return hits
+    selected: list[dict] = []
+    src_counts: dict[str, int] = {}
+    for h in hits:
+        src = h.get("payload", {}).get("source", "")
+        if src and src_counts.get(src, 0) >= max_per_source:
+            continue
+        if src:
+            src_counts[src] = src_counts.get(src, 0) + 1
+        selected.append(h)
+    return selected
+
 # [K] Multi-query: несколько формулировок запроса на секцию.
 # Расширяет семантический охват — разные формулировки дают разные чанки.
 SECTION_QUERIES = {
@@ -114,6 +137,7 @@ SECTION_QUERIES = {
 
 # Глобальный лог генерации — [C]
 _generation_log: dict = {}
+_json_parse_failures: dict = {}
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +202,7 @@ def _search_qdrant(vec: list, payload_filter: dict | None, top_k: int) -> list:
 
 
 def retrieve(section: str, discipline: str, section_types: list = None,
-             direction: str = "", level: str = "") -> tuple[str, list]:
+             direction: str = "", level: str = "") -> tuple[str, list, list]:
     """
     Ищет релевантные чанки в Qdrant.
 
@@ -187,7 +211,7 @@ def retrieve(section: str, discipline: str, section_types: list = None,
     [S] Фильтр использует "section_type" (верхний уровень payload).
     [R] При пустом результате возвращает пустую строку с флагом для caller.
 
-    Возвращает: (ctx_string, hits_list) для логирования [C].
+    Возвращает: (ctx_string, reranked_hits, raw_hits) для логирования [C].
     """
     cache_key = f"{section}|{discipline}|{','.join(section_types or [])}|{direction}|{level}"
     if cache_key in RETRIEVE_CACHE:
@@ -220,18 +244,25 @@ def retrieve(section: str, discipline: str, section_types: list = None,
             vec = get_embedding(query_text)
             if not vec:
                 continue
-            hits = _search_qdrant(vec, payload_filter, GENERATION["top_k"])
+            hits = _search_qdrant(vec, payload_filter, GENERATION["retrieve_top_k"])
             for h in hits:
                 hit_id = h.get("id")
                 if hit_id not in all_hits or h.get("score", 0) > all_hits[hit_id].get("score", 0):
                     all_hits[hit_id] = h
 
-        # Фильтруем по базовому score и ранжируем с учётом priority.
-        good_hits = sorted(
+        # [STEP-3] Фаза 1: кандидаты retrieval (до rerank).
+        raw_hits = sorted(
             [h for h in all_hits.values() if h.get("score", 0) >= GENERATION["min_score"]],
-            key=_rank_score,
+            key=lambda h: h.get("score", 0),
             reverse=True
-        )[:GENERATION["top_k"]]
+        )[:GENERATION["retrieve_top_k"]]
+
+        # [STEP-3] Фаза 2: rerank по приоритету + diversity по source.
+        reranked_hits = sorted(raw_hits, key=_rank_score, reverse=True)
+        reranked_hits = _apply_source_diversity(
+            reranked_hits, GENERATION["max_chunks_per_source"]
+        )
+        good_hits = reranked_hits[:GENERATION["top_k"]]
 
         # [R] Fallback при пустом retrieval — снижаем порог и убираем фильтр
         if not good_hits:
@@ -239,15 +270,20 @@ def retrieve(section: str, discipline: str, section_types: list = None,
                   f"пробую без доменного фильтра...")
             vec = get_embedding(queries[0])
             if vec:
-                hits = _search_qdrant(vec, None, GENERATION["top_k"])
-                good_hits = sorted(
+                hits = _search_qdrant(vec, None, GENERATION["retrieve_top_k"])
+                raw_hits = sorted(
                     [h for h in hits if h.get("score", 0) >= GENERATION["min_score"] * 0.7],
-                    key=_rank_score,
+                    key=lambda h: h.get("score", 0),
                     reverse=True
-                )[:GENERATION["top_k"]]
+                )[:GENERATION["retrieve_top_k"]]
+                reranked_hits = sorted(raw_hits, key=_rank_score, reverse=True)
+                reranked_hits = _apply_source_diversity(
+                    reranked_hits, GENERATION["max_chunks_per_source"]
+                )
+                good_hits = reranked_hits[:GENERATION["top_k"]]
 
         print(
-            f"    🔍 RAG [{section}]: найдено {len(good_hits)} чанков "
+            f"    🔍 RAG [{section}]: raw={len(raw_hits)} → reranked={len(good_hits)} "
             f"(scores: {[round(h.get('score', 0), 3) for h in good_hits]}, "
             f"ranked: {[round(_rank_score(h), 3) for h in good_hits]})"
         )
@@ -294,28 +330,35 @@ def retrieve(section: str, discipline: str, section_types: list = None,
             ctx = ctx[:MAX_CONTEXT_CHARS].rsplit("\n", 1)[0]
             ctx += "\n[...контекст обрезан до MAX_CONTEXT_CHARS символов...]"
 
-        RETRIEVE_CACHE[cache_key] = (ctx, good_hits)
-        return ctx, good_hits
+        RETRIEVE_CACHE[cache_key] = (ctx, good_hits, raw_hits)
+        return ctx, good_hits, raw_hits
 
     except Exception as e:
         print(f"  ⚠️  RAG [{section}]: {e}")
-        return "", []
+        return "", [], []
 
 
-def llm(prompt: str, max_tokens: int = 600) -> str:
+def llm(prompt: str, max_tokens: int = 600, json_mode: bool = False,
+        temperature: float = 0.3) -> str:
     for attempt in range(3):
         try:
+            options = {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+                "num_ctx": 4096,  # [L] увеличено с 2048
+            }
+            body = {
+                "model": OLLAMA["llm_model"],
+                "prompt": prompt,
+                "stream": False,
+                "options": options,
+            }
+            # [STEP-2] Для JSON-секций просим строгий JSON-формат.
+            if json_mode:
+                body["format"] = "json"
+
             r = requests.post(OLLAMA["generate_url"],
-                json={
-                    "model": OLLAMA["llm_model"],
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.3,
-                        "num_predict": max_tokens,
-                        "num_ctx": 4096,  # [L] увеличено с 2048
-                    }
-                },
+                json=body,
                 timeout=180)
             r.raise_for_status()
             text = r.json().get("response", "")
@@ -353,7 +396,8 @@ def _sanitize_retrieved_text(text: str) -> str:
 
 
 def gen(label: str, discipline: str, prompt: str,
-        direction: str = "", level: str = "", **extra) -> str:
+        direction: str = "", level: str = "", json_mode: bool = False,
+        temperature: float = 0.3, **extra) -> str:
     """
     Генерация секции с RAG-контекстом.
 
@@ -361,7 +405,7 @@ def gen(label: str, discipline: str, prompt: str,
     [C] Сохраняет данные в _generation_log для последующей записи в JSON.
     """
     section_types = SECTION_TYPE_FILTER.get(label)
-    ctx, hits = retrieve(label, discipline, section_types, direction, level)
+    ctx, hits, raw_hits = retrieve(label, discipline, section_types, direction, level)
 
     # [замечание #13] Санитизация retrieved-контекста перед вставкой в промпт
     ctx = _sanitize_retrieved_text(ctx)
@@ -385,16 +429,27 @@ def gen(label: str, discipline: str, prompt: str,
     # Добавляем явно, до **extra — чтобы extra мог при необходимости переопределить.
     fmt_vars = {"discipline": discipline, "direction": direction, "level": level, **extra}
     full_prompt = ctx_block + prompt.format(**fmt_vars) + f"\n\nСоздай для «{discipline}»:"
-    result = llm(full_prompt)
+    result = llm(full_prompt, json_mode=json_mode, temperature=temperature)
 
     # [C] Логируем для generation_log.json
     _generation_log[label] = {
         "prompt_preview":   full_prompt[:600],
+        "retrieved_raw": [
+            {
+                "id":           h.get("id"),
+                "source":       h.get("payload", {}).get("source", ""),
+                "score":        round(h.get("score", 0), 4),
+                "rank_score":   round(_rank_score(h), 4),
+                "text_preview": h.get("payload", {}).get("text", "")[:120],
+            }
+            for h in raw_hits
+        ],
         "retrieved_chunks": [
             {
                 "id":           h.get("id"),
                 "source":       h.get("payload", {}).get("source", ""),
                 "score":        round(h.get("score", 0), 4),
+                "rank_score":   round(_rank_score(h), 4),
                 "text_preview": h.get("payload", {}).get("text", "")[:120],
             }
             for h in hits
@@ -1522,18 +1577,35 @@ def gen_with_json_retry(label: str, discipline: str, prompt: str,
     3. При неудаче: до max_retries перегенераций
     4. Если JSON так и не распарсился — regex-fallback через parser_fallback
     """
-    raw = gen(label, discipline, prompt, direction=direction, level=level, **extra)
+    _json_parse_failures.setdefault(label, 0)
+
+    raw = gen(
+        label, discipline, prompt,
+        direction=direction, level=level,
+        json_mode=True,
+        temperature=0.2,
+        **extra,
+    )
     result = parser_json(raw)
     if result is not None:
         return raw, result
+    _json_parse_failures[label] += 1
 
     for attempt in range(max_retries):
         print(f"  🔄 [{label}] JSON не распарсился (попытка {attempt + 1}/{max_retries}), "
               f"перегенерация...")
-        raw = gen(label, discipline, prompt, direction=direction, level=level, **extra)
+        retry_temperature = 0.15 if attempt == 0 else 0.1
+        raw = gen(
+            label, discipline, prompt,
+            direction=direction, level=level,
+            json_mode=True,
+            temperature=retry_temperature,
+            **extra,
+        )
         result = parser_json(raw)
         if result is not None:
             return raw, result
+        _json_parse_failures[label] += 1
 
     print(f"  ⚠️  [{label}] JSON недоступен после {max_retries} попыток — regex-fallback")
     return raw, parser_fallback(raw)
@@ -1710,6 +1782,11 @@ def main(config_path: Optional[str] = None):
     print(f"\n✅ Сохранено: {OUTPUT_DOCX}")
 
     # [C] Сохраняем лог генерации
+    # [STEP-2] Добавляем счётчики JSON parse failures по секциям.
+    for label, fail_count in _json_parse_failures.items():
+        if label in _generation_log:
+            _generation_log[label]["json_parse_failures"] = fail_count
+
     try:
         with open(GENERATION_LOG, "w", encoding="utf-8") as f:
             json.dump(_generation_log, f, ensure_ascii=False, indent=2)
