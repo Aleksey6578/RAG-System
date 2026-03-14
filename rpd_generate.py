@@ -425,15 +425,31 @@ def detect_old_discipline(doc: Document) -> str:
 def replace_text_in_paragraph(para, old: str, new: str):
     if old not in para.text:
         return
+    # Быстрый путь: old целиком в одном run — заменяем, не трогая остальные
     for run in para.runs:
         if old in run.text:
             run.text = run.text.replace(old, new)
             return
+    # [БАГ 2 ИСПРАВЛЕНО]: old разбит между несколькими runs.
+    # Сохраняем rPr (форматирование) первого run, очищаем все runs,
+    # кладём замену в runs[0] и восстанавливаем оригинальный rPr.
+    if not para.runs:
+        return
+    from copy import deepcopy
+    WNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    rpr_tag = f"{{{WNS}}}rPr"
+    first_r = para.runs[0]._r
+    saved_rpr = deepcopy(first_r.find(rpr_tag))  # None если rPr нет
     full = para.text.replace(old, new)
     for run in para.runs:
         run.text = ""
-    if para.runs:
-        para.runs[0].text = full
+    para.runs[0].text = full
+    # Восстанавливаем bold/italic/font/size/colour из сохранённого rPr
+    if saved_rpr is not None:
+        existing = para.runs[0]._r.find(rpr_tag)
+        if existing is not None:
+            para.runs[0]._r.remove(existing)
+        para.runs[0]._r.insert(0, saved_rpr)
 
 
 def replace_all(doc: Document, old: str, new: str):
@@ -761,9 +777,13 @@ def parse_list_json(text: str, min_items: int = 3) -> list | None:
         return None
 
 
-def parse_list(text: str, discipline: str = "") -> list:
-    """[A] Парсит список ЛР/ПЗ: JSON-режим → regex-fallback."""
-    json_result = parse_list_json(text)
+def parse_list(text: str, discipline: str = "", min_items: int = 3) -> list:
+    """[A] Парсит список ЛР/ПЗ: JSON-режим → regex-fallback.
+    [БАГ 3 ИСПРАВЛЕНО]: добавлен параметр min_items (ранее был захардкожен как 3).
+    Caller передаёт min_items=6 → fallback-список из 4 ЛР/ПЗ теперь
+    корректно отклоняется вместо попадания в документ.
+    """
+    json_result = parse_list_json(text, min_items=min_items)
     if json_result:
         return json_result[:8]
 
@@ -785,7 +805,7 @@ def parse_list(text: str, discipline: str = "") -> list:
         if any(kw in line.lower() for kw in OFFTRACK_KEYWORDS):
             continue
         items.append(line)
-    return items[:8] if items else ["Лабораторная работа 1", "Лабораторная работа 2"]
+    return items[:8] if len(items) >= min_items else ["Лабораторная работа 1", "Лабораторная работа 2"]
 
 
 # ---------------------------------------------------------------------------
@@ -1104,12 +1124,18 @@ def fill_lab_table(doc: Document, lab_works: list, topics: list, hours_lab: int 
             lab_works.append(f"Лабораторная работа {j + 1}")
 
     sections = [t for t in topics if re.match(r"^Раздел\s*\d+", t)]
-    hrs_each = max(hours_lab // len(lab_works), 1)
+    # [БАГ 5 ИСПРАВЛЕНО]: целочисленное деление теряло остаток.
+    # Пример: 18ч / 7 ЛР → hrs_each=2, ИТОГО=14 ≠ 18.
+    # Теперь remainder распределяется по первым ЛР (каждая получает +1ч).
+    n_lab = len(lab_works)
+    base  = max(hours_lab // n_lab, 1)
+    rem   = hours_lab - base * n_lab
+    hours_list = [base + (1 if i < rem else 0) for i in range(n_lab)]
 
     for i, work in enumerate(lab_works, 1):
         section = sections[(i - 1) % max(len(sections), 1)] if sections else f"Раздел {((i - 1) // 2) + 1}"
-        add_table_row(table, [section, str(i), work, str(hrs_each), "", ""], tmpl)
-    add_table_row(table, ["-", "", "ИТОГО:", str(hrs_each * len(lab_works)), "", ""], tmpl)
+        add_table_row(table, [section, str(i), work, str(hours_list[i - 1]), "", ""], tmpl)
+    add_table_row(table, ["-", "", "ИТОГО:", str(hours_lab), "", ""], tmpl)
 
 
 def fill_practice_table(doc: Document, practices: list, topics: list,
@@ -1124,17 +1150,29 @@ def fill_practice_table(doc: Document, practices: list, topics: list,
             practices.append(f"Практическое занятие {j + 1}")
 
     sections = [t for t in topics if re.match(r"^Раздел\s*\d+", t)]
-    hrs_each = max(hours_practice // len(practices), 1)
+    # [БАГ 5 ИСПРАВЛЕНО]: аналогично fill_lab_table — равномерное распределение
+    # остатка часов на первые занятия, чтобы сумма строк = hours_practice.
+    n_prac = len(practices)
+    base   = max(hours_practice // n_prac, 1)
+    rem    = hours_practice - base * n_prac
+    hours_list = [base + (1 if i < rem else 0) for i in range(n_prac)]
 
     for i, prac in enumerate(practices, 1):
         section = sections[(i - 1) % max(len(sections), 1)] if sections else f"Раздел {((i - 1) // 2) + 1}"
-        add_table_row(table, [section, str(i), prac, str(hrs_each), "", ""], tmpl)
-    add_table_row(table, ["-", "", "ИТОГО:", str(hrs_each * len(practices)), "", ""], tmpl)
+        add_table_row(table, [section, str(i), prac, str(hours_list[i - 1]), "", ""], tmpl)
+    add_table_row(table, ["-", "", "ИТОГО:", str(hours_practice), "", ""], tmpl)
 
 
 def fill_t3_hours(doc: Document, semester: str, credits: int,
                   hours_total: int, hours_contact: int, hours_sro: int,
                   exam_type: str):
+    # [БАГ 4 ИСПРАВЛЕНО]: добавлена явная проверка границы — все остальные
+    # fill_*() делают raise IndexError, fill_t3_hours молча падал с необработанным
+    # IndexError при шаблоне с менее чем 4 таблицами.
+    if len(doc.tables) <= 3:
+        raise IndexError(
+            f"Шаблон содержит {len(doc.tables)} таблиц, нужна Т3 (индекс 3)"
+        )
     t = doc.tables[3]
     if len(t.rows) < 5:
         return
@@ -1192,13 +1230,20 @@ def fill_t11_sro(doc: Document, topics: list, sro: int):
     hrs_prep  = sro - hrs_study - hrs_rgr
 
     sro_types = [
-        ("подготовка к лабораторным и практическим занятиям", hrs_prep),
-        ("изучение учебного материала, вынесенного на СРО",   hrs_study),
-        ("выполнение расчётно-графической работы",            hrs_rgr),
+        # [БАГ 5 doc]: добавлен "/или" в название вида СРО (замечание по документу #5)
+        ("подготовка к лабораторным и/или практическим занятиям", hrs_prep),
+        ("изучение учебного материала, вынесенного на СРО",       hrs_study),
+        ("выполнение расчётно-графической работы",                 hrs_rgr),
     ]
-    for sec in sections:
+    for sec_idx, sec in enumerate(sections):
         for stype, total_hrs in sro_types:
-            hrs_per_sec = round(total_hrs / n)
+            # [БАГ 6 ИСПРАВЛЕНО]: round() давал расхождение суммы строк и ИТОГО.
+            # Последний раздел получает остаток: total_hrs - base*(n-1).
+            base_per_sec = round(total_hrs / n)
+            if sec_idx < n - 1:
+                hrs_per_sec = base_per_sec
+            else:
+                hrs_per_sec = total_hrs - base_per_sec * (n - 1)
             add_table_row(t, [sec, stype, str(hrs_per_sec), "", ""], tmpl)
     add_table_row(t, ["-", "ИТОГО:", str(sro), "", ""], tmpl)
 
@@ -1216,11 +1261,14 @@ def fill_t21_fos(doc: Document, competencies: list, topics: list):
     for i, sec in enumerate(sections):
         sec_name = re.sub(r"^Раздел\s*\d+\.\s*", "", sec)
         for code, desc in competencies:
+            # [БАГ 7 ИСПРАВЛЕНО]: ранее ocs[i % len(ocs)] — смена оценочного средства
+            # происходила только при смене раздела, а не строки. Все компетенции одного
+            # раздела получали одно оценочное средство. Теперь ротация по счётчику строк n.
             add_table_row(t, [
                 str(n), sec_name, f"В({code})", desc,
                 f"{code}.1 Демонстрирует применение методов на практике",
                 f"Выполняет задания по разделу «{sec_name}»",
-                ocs[i % len(ocs)]
+                ocs[(n - 1) % len(ocs)]
             ], tmpl)
             n += 1
 

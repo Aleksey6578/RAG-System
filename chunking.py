@@ -69,7 +69,7 @@ MAX_WORDS = MAX_TOKENS
 OVERLAP   = OVERLAP_TOKENS
 MIN_WORDS = MIN_TOKENS
 
-MAX_CHUNKS_PER_SECTION_TYPE = 15
+MAX_CHUNKS_PER_SECTION_TYPE = 25  # [БАГ 9 ИСПРАВЛЕНО]: было 15 — крупные РПД теряли контент без предупреждения
 
 NOISE_TITLES = {
     "УТВЕРЖДАЮ", "СОГЛАСОВАНО", "СВЕДЕНИЯ",
@@ -252,6 +252,17 @@ def smart_split(text: str,
                     if overlap_tc >= overlap:
                         break
                 start = max(start + 1, end - 1 - overlap_words)
+            # [БАГ 10 ИСПРАВЛЕНО]: после sliding window выполнялся continue —
+            # параграф не попадал в current, и следующий нормальный параграф
+            # начинался без overlap, разрывая контекстную связность.
+            # Теперь сохраняем хвост последнего чанка как seed для overlap.
+            if chunks:
+                tail_words = chunks[-1].split()[-overlap * 2:]  # берём с запасом
+                tail_text = " ".join(tail_words)
+                if count_tokens(tail_text) >= MIN_TOKENS:
+                    current.append(tail_text)
+                    current_tcs.append(count_tokens(tail_text))
+                    current_size = current_tcs[-1]
             continue
 
         if current_size + tc > max_tokens and current:
@@ -358,6 +369,12 @@ def main():
 
         stype_count   = stats_source[source]["by_stype"].get(stype_for_limit, 0)
         if stype_count >= MAX_CHUNKS_PER_SECTION_TYPE:
+            # [БАГ 9 ИСПРАВЛЕНО]: предупреждение при срабатывании лимита
+            print(
+                f"  ⚠️  [{source}] лимит {MAX_CHUNKS_PER_SECTION_TYPE} чанков "
+                f"для типа '{stype_for_limit}' достигнут — блок пропущен: "
+                f"{section_title!r:.60}"
+            )
             continue
 
         doc_pos_start = stats_source[source]["chunks"]

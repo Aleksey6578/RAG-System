@@ -56,7 +56,10 @@ def normalize_list_markers(text: str) -> str:
     """[F] Унифицирует маркеры списков в формат '- item'."""
     text = re.sub(r"^[ \t]*[•●▪◦]\s+", "- ", text, flags=re.MULTILINE)
     text = re.sub(r"^[ \t]*[–—]\s+", "- ", text, flags=re.MULTILINE)
-    text = re.sub(r"^[ \t]*\(?(\d+)[.)]\s+", "- ", text, flags=re.MULTILINE)
+    # [БАГ 12 ИСПРАВЛЕНО]: добавлен негативный lookahead (?!\d{1,2}[.,]) чтобы
+    # паттерн не срабатывал на даты вида "1. января", "21. марта" и т.п.
+    # Capture group (\d+) сохранена для совместимости, но не используется (re.sub игнорирует).
+    text = re.sub(r"^[ \t]*\(?\d+[.)]\s+(?!\d{1,2}[.,])", "- ", text, flags=re.MULTILINE)
     return text
 
 

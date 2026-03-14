@@ -132,7 +132,11 @@ def process_table(table: Table) -> Dict:
     raw_rows = []
     for row in table.rows:
         cells = []
+        seen_tcs: set = set()  # [БАГ 1 ИСПРАВЛЕНО]: дедупликация merged-ячеек
         for cell in row.cells:
+            if cell._tc in seen_tcs:
+                continue
+            seen_tcs.add(cell._tc)
             cell_text = " ".join(
                 p.text.strip() for p in cell.paragraphs if p.text.strip()
             )
@@ -392,19 +396,22 @@ def process_document(doc_path: Path) -> Dict:
             else:
                 buffer.append(text)
 
-        elif item_type == "table" and current_section:
+        elif item_type == "table":
+            # [БАГ 8 ИСПРАВЛЕНО]: убрано условие `and current_section`.
+            # Таблицы до первого заголовка (титульная страница РПД) больше не теряются.
             if buffer:
                 flush_buffer()
-            stype = detect_section_type(current_section)
+            _sec = current_section or "Введение"
+            stype = detect_section_type(_sec)
             row_blocks = extract_key_table_rows(
-                item, stype, doc_path.name, current_section,
+                item, stype, doc_path.name, _sec,
                 document_id=doc_id, section_level=current_level,
             )
             if row_blocks:
                 chunks.extend(row_blocks)
             else:
                 for b in table_to_blocks(
-                    item, doc_path.name, current_section,
+                    item, doc_path.name, _sec,
                     section_level=current_level,
                     document_id=doc_id,
                 ):

@@ -137,8 +137,13 @@ def create_payload_indexes(collection: str) -> None:
 # Upsert
 # ---------------------------------------------------------------------------
 
-def upsert_batch(ids: list, vectors: list, payloads: list) -> bool:
-    """Загрузка батча в формате batch (ids/vectors/payloads)."""
+def upsert_batch(ids: list, vectors: list, payloads: list) -> tuple[bool, list]:
+    """Загрузка батча в формате batch (ids/vectors/payloads).
+    
+    [БАГ 11 ИСПРАВЛЕНО]: возвращает (успех, список failed point ids).
+    HTTP 206 Partial Content раньше считался полным успехом, но тело содержит
+    failed points — они не перезагружались даже при retry.
+    """
     body = {
         "batch": {
             "ids":      ids,
@@ -151,25 +156,55 @@ def upsert_batch(ids: list, vectors: list, payloads: list) -> bool:
         json=body,
         timeout=60,
     )
-    if r.status_code not in (200, 206):
+    if r.status_code == 206:
+        # Частичная ошибка — разбираем failed points
+        try:
+            failed = r.json().get("result", {}).get("failed", [])
+        except Exception:
+            failed = []
+        if failed:
+            print(f"  ⚠️  HTTP 206: {len(failed)} точек не загружено: {failed[:5]}")
+        return True, [f["id"] for f in failed] if failed else []
+    if r.status_code not in (200,):
         print(f"  Ошибка upsert: {r.status_code} {r.text[:300]}")
-        return False
-    return True
+        return False, ids  # всё провалилось
+    return True, []
 
 
 def upsert_batch_with_retry(ids: list, vectors: list, payloads: list) -> bool:
     """
     [O] Retry для upsert_batch при ошибках Qdrant (503, timeout и т.п.).
-    При каждой неудаче задержка удваивается.
+    [БАГ 11 ИСПРАВЛЕНО]: обрабатываем failed points из HTTP 206 — повторяем
+    только провалившиеся точки, а не весь батч.
     """
     delay = RETRY_DELAY
+
+    # --- первый вызов ---
     for attempt in range(1, RETRY_COUNT + 1):
-        if upsert_batch(ids, vectors, payloads):
+        ok, failed_ids = upsert_batch(ids, vectors, payloads)
+        if ok and not failed_ids:
             return True
+        if ok and failed_ids:
+            # Частичная ошибка: повторяем только failed points
+            print(f"  Retry {len(failed_ids)} failed points (попытка {attempt}/{RETRY_COUNT})...")
+            failed_set  = set(failed_ids)
+            retry_pairs = [(i, v, p) for i, v, p in zip(ids, vectors, payloads)
+                           if i in failed_set]
+            ids_r      = [x[0] for x in retry_pairs]
+            vectors_r  = [x[1] for x in retry_pairs]
+            payloads_r = [x[2] for x in retry_pairs]
+            time.sleep(delay)
+            delay *= 2
+            ok2, still_failed = upsert_batch(ids_r, vectors_r, payloads_r)
+            if still_failed:
+                print(f"  ❌ {len(still_failed)} точек так и не загружены: {still_failed[:5]}")
+            return ok2
+        # Полная ошибка — retry всего батча
         if attempt < RETRY_COUNT:
             print(f"  Retry upsert {attempt}/{RETRY_COUNT}... ждём {delay:.0f}с")
             time.sleep(delay)
             delay *= 2
+
     print(f"  ❌ Батч из {len(ids)} точек не загружен после {RETRY_COUNT} попыток")
     return False
 
