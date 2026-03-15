@@ -358,6 +358,12 @@ def _extract_json_candidate(raw_text: str) -> str:
     return cleaned
 
 
+def _looks_like_json_container(text: str) -> bool:
+    """Быстрая проверка, что ответ содержит JSON-объект или JSON-массив."""
+    candidate = (text or "").strip()
+    return ("[" in candidate and "]" in candidate) or ("{" in candidate and "}" in candidate)
+
+
 def _repair_json_with_llm(raw_json: str) -> str:
     """Промежуточный repair-проход: исправляет только JSON, без изменения смысла."""
     prompt = (
@@ -2803,11 +2809,25 @@ def gen_with_json_retry(label: str, discipline: str, prompt: str,
         _json_parse_failures[label] += 1
 
     for attempt in range(max_retries):
-        print(f"  🔄 [{label}] JSON не распарсился (попытка {attempt + 1}/{max_retries}), "
-              f"перегенерация...")
+        has_json_shell = _looks_like_json_container(raw)
+        if has_json_shell:
+            print(f"  🔄 [{label}] JSON не распарсился (попытка {attempt + 1}/{max_retries}), "
+                  f"перегенерация...")
+        else:
+            print(f"  🔄 [{label}] Модель вернула не-JSON ответ (попытка {attempt + 1}/{max_retries}), "
+                  f"усиливаю формат...")
+
         retry_temperature = 0.15 if attempt == 0 else 0.1
+        retry_prompt = prompt
+        if not has_json_shell:
+            retry_prompt = (
+                f"{prompt}\n\n"
+                "ВАЖНО: Ответ ДОЛЖЕН быть валидным JSON-массивом и начинаться с '['. "
+                "Не добавляй пояснений, markdown-блоков и текста до/после JSON."
+            )
+
         raw = gen(
-            label, discipline, prompt,
+            label, discipline, retry_prompt,
             direction=direction, level=level,
             json_mode=True,
             temperature=retry_temperature,
