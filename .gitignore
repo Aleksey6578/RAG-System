@@ -5,18 +5,3 @@ __pycache__/
 .idea/
 .vscode/
 .DS_Store
-
-# Temporary generation artifacts
-GENERATION*
-*_SOFT_LIMIT_CHUNKS
-*.gen.tmp
-*.generation.tmp
-
-# Shell/runtime error artifacts
-nohup.out
-*.err
-*.error
-*.stderr
-*.stackdump
-core
-core.*

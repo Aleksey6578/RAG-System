@@ -1,0 +1,54 @@
+{
+  "discipline": "Интеллектуальные системы",
+  "generated_docx": "output_rpd.docx",
+  "reference_source": "rpd_29.json",
+  "reference_title": "Интеллектуальные системы управления",
+  "reference_mode": "jsonl",
+  "embedding_similarity": 0.9131,
+  "metrics": {
+    "competencies": {
+      "bleu": 0.1438,
+      "rouge1": 0.7368,
+      "rouge2": 0.3529,
+      "rougeL": 0.6316
+    },
+    "outcomes": {
+      "bleu": 0.1556,
+      "rouge1": 0.5419,
+      "rouge2": 0.4314,
+      "rougeL": 0.529
+    },
+    "content": {
+      "bleu": 0.0368,
+      "rouge1": 0.3099,
+      "rouge2": 0.1739,
+      "rougeL": 0.2817
+    },
+    "lab_works": {
+      "bleu": 0.0,
+      "rouge1": 0.1674,
+      "rouge2": 0.1013,
+      "rougeL": 0.1506
+    },
+    "practice": {
+      "bleu": 0.0,
+      "rouge1": 0.0,
+      "rouge2": 0.0,
+      "rougeL": 0.0,
+      "note": "empty_reference"
+    },
+    "bibliography": {
+      "bleu": 0.085,
+      "rouge1": 0.3425,
+      "rouge2": 0.257,
+      "rougeL": 0.3204
+    },
+    "overall": {
+      "bleu": 0.3376,
+      "rouge1": 0.6211,
+      "rouge2": 0.4858,
+      "rougeL": 0.4779
+    }
+  },
+  "timestamp": "2026-04-02T23:55:38"
+}

@@ -77,7 +77,12 @@ SECTION_TYPE_MAP = [
     # в отдельный тип "bibliography" — согласовано с classify_section() в chunking.py.
     # Раньше они попадали в "place", что делало разделы литературы невидимыми
     # для retrieval-фильтров с section_type = "bibliography".
-    (["литератур", "библиограф", "учебно-методич"],                "bibliography"),
+    # [З-C1] ИСПРАВЛЕНО: добавлены "учебной литератур", "обеспеченност", "сведени" —
+    # заголовок «СВЕДЕНИЯ об обеспеченности дисциплины учебной литературой» не
+    # содержал прежних ключевых слов → попадал в "other" → 0 чанков bibliography
+    # в Qdrant → retrieval литературы всегда возвращал пустой контекст → fallback.
+    (["литератур", "библиограф", "учебно-методич",
+      "учебной литератур", "обеспеченност", "сведени"],             "bibliography"),
     (["ресурс", "библиотек", "программн", "информационн"],         "place"),
 ]
 
@@ -128,6 +133,21 @@ def detect_section_type(section_title: Optional[str]) -> str:
 # [E] Структурированные таблицы
 # ---------------------------------------------------------------------------
 
+def _is_numeric_row(cells: list) -> bool:
+    """
+    [З-C3] Проверяет, является ли строка «числовой шапкой» — артефактом
+    объединённых ячеек в DOCX (строки вида «1 | 2 | 3 | 5 | 5 | 6 | 7»).
+    Такие строки появляются как вторая строка в таблицах со сложной шапкой
+    (например, «СВЕДЕНИЯ об обеспеченности»), где первая строка — реальные
+    заголовки, а вторая — сквозная нумерация столбцов.
+    Критерий: все непустые ячейки содержат только цифры.
+    """
+    non_empty = [c.strip() for c in cells if c.strip()]
+    if not non_empty:
+        return False
+    return all(re.match(r"^\d+$", c) for c in non_empty)
+
+
 def process_table(table: Table) -> Dict:
     raw_rows = []
     for row in table.rows:
@@ -145,7 +165,16 @@ def process_table(table: Table) -> Dict:
             raw_rows.append(cells)
     if not raw_rows:
         return {"headers": [], "rows": []}
-    return {"headers": raw_rows[0], "rows": raw_rows[1:]}
+
+    # [З-C3] ИСПРАВЛЕНО: первая строка — заголовки. Вторая строка отфильтровывается
+    # если она представляет собой числовую нумерацию столбцов (1|2|3|5|5|6|7|9).
+    # Такой артефакт типичен для таблиц с объединёнными ячейками в шапке.
+    headers   = raw_rows[0]
+    data_rows = raw_rows[1:]
+    if data_rows and _is_numeric_row(data_rows[0]):
+        data_rows = data_rows[1:]
+
+    return {"headers": headers, "rows": data_rows}
 
 
 def table_to_text(table_data: Dict) -> str:
@@ -168,20 +197,36 @@ def extract_key_table_rows(
     document_id: str = "",
     section_level: int = 0,
 ) -> List[Dict]:
-    if section_type not in ("competencies", "learning_outcomes", "content", "assessment"):
+    # [З-C2] ИСПРАВЛЕНО: добавлен тип "bibliography" — строки таблицы литературы
+    # (отдельная книга = отдельная строка) теперь извлекаются как отдельные
+    # table_row чанки вместо одного монолитного table-блока.
+    if section_type not in ("competencies", "learning_outcomes", "content", "assessment",
+                            "bibliography"):
         return []
     table_data = process_table(table)
     headers = table_data.get("headers", [])
     rows    = table_data.get("rows", [])
     if not rows:
         return []
+
+    # [З-C4] ИСПРАВЛЕНО: заголовок таблицы добавляется только к первому чанку.
+    # Прежде header_line повторялся в КАЖДОЙ строке → 8 чанков content начинались
+    # с одинакового «№ пп. | Номер раздела | Название темы | Трудоемкость, часы».
+    # Это засоряло retrieval одинаковыми префиксами и снижало эффективность
+    # дедупликации по тексту в chunking.py.
+    # Новое поведение: первый чанк содержит «заголовок + строка», последующие —
+    # только строки данных, без повторного заголовка.
     header_line = " | ".join(str(h) for h in headers) if headers else ""
     blocks = []
-    for row_cells in rows:
+    for idx, row_cells in enumerate(rows):
         row_text = " | ".join(str(c) for c in row_cells)
         if not row_text.strip() or len(row_text.split()) < 5:
             continue
-        text = f"{header_line}\n{row_text}" if header_line else row_text
+        # Заголовок только у первого содержательного чанка
+        if header_line and idx == 0:
+            text = f"{header_line}\n{row_text}"
+        else:
+            text = row_text
         row_lower = row_text.lower()
         effective_type = "learning_outcomes" if any(
             kw in row_lower for kw in ("знать:", "уметь:", "владеть:", "з(", "у(", "в(")
@@ -190,7 +235,7 @@ def extract_key_table_rows(
             "document_id":   document_id,
             "title":         doc_name,
             "section_title": section_title,
-            "section_level": section_level,   # [6] int
+            "section_level": section_level,
             "section_type":  effective_type,
             "text":          text,
             "type":          "table_row",
