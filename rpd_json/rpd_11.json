@@ -758,7 +758,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ЛР | Название лабораторной работы | Трудоемкость, часы\nНомер раздела | № ЛР | Название лабораторной работы | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -767,7 +767,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-EDA и статистика | 1 | Разведочный анализ реального датасета: выбросы, распределения, корреляции | 2 |  | ",
       "type": "table_row"
     },
@@ -776,7 +776,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-EDA и статистика | 2 | Проверка статистических гипотез об однородности групп клиентов | 2 |  | ",
       "type": "table_row"
     },
@@ -785,7 +785,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Предобработка данных | 3 | Построение ETL-конвейера с очисткой и трансформацией данных с Pandas | 2 |  | ",
       "type": "table_row"
     },
@@ -794,7 +794,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Алгоритмы Data Mining | 4 | Кластеризация клиентской базы методами k-means и DBSCAN | 2 |  | ",
       "type": "table_row"
     },
@@ -803,7 +803,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Алгоритмы Data Mining | 5 | Анализ покупательской корзины алгоритмом Apriori | 2 |  | ",
       "type": "table_row"
     },
@@ -812,7 +812,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Интерпретация | 6 | Построение интерактивного дашборда аналитики продаж с Plotly Dash | 2 |  | ",
       "type": "table_row"
     },
@@ -821,7 +821,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 12 |  | ",
       "type": "table_row"
     },
@@ -830,7 +830,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ПЗ | Тема практического занятия | Трудоемкость, часы\nНомер раздела | № ПЗ | Тема практического занятия | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -839,7 +839,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-EDA и статистика | 1 | A/B-тестирование маркетинговых кампаний: критерии Стьюдента и Манна-Уитни | 2 |  | ",
       "type": "table_row"
     },
@@ -848,7 +848,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Предобработка данных | 2 | Снижение размерности с PCA и UMAP для визуализации многомерных данных | 2 |  | ",
       "type": "table_row"
     },
@@ -857,7 +857,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Алгоритмы Data Mining | 3 | Оценка качества кластеризации метриками silhouette и Calinski-Harabasz | 2 |  | ",
       "type": "table_row"
     },
@@ -866,7 +866,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Алгоритмы Data Mining | 4 | Обнаружение аномалий методами Isolation Forest и Local Outlier Factor | 2 |  | ",
       "type": "table_row"
     },
@@ -875,7 +875,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Интерпретация | 5 | Интерпретация моделей с SHAP-значениями для бизнес-аудитории | 2 |  | ",
       "type": "table_row"
     },
@@ -884,7 +884,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Интерпретация | 6 | Построение пайплайна автоматической генерации аналитических отчётов | 2 |  | ",
       "type": "table_row"
     },
@@ -893,7 +893,7 @@
       "title": "rpd_11.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 12 |  | ",
       "type": "table_row"
     },

@@ -715,7 +715,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ЛР | Название лабораторной работы | Трудоемкость, часы\nНомер раздела | № ЛР | Название лабораторной работы | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -724,7 +724,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Системное программирование | 1 | Разработка системной утилиты с использованием POSIX API\nЦель: освоить работу с файловой системой через системные вызовы | 2 |  | ",
       "type": "table_row"
     },
@@ -733,7 +733,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Системное программирование | 2 | Работа с процессами: fork, exec, wait, сигналы\nЦель: научиться управлять процессами и обрабатывать сигналы | 2 |  | ",
       "type": "table_row"
     },
@@ -742,7 +742,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Системное программирование | 3 | Многопоточное приложение с синхронизацией через mutex\nЦель: освоить POSIX Threads и механизмы синхронизации | 2 |  | ",
       "type": "table_row"
     },
@@ -751,7 +751,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Системное программирование | 4 | Producer-Consumer с semaphore и condition variable\nЦель: реализовать паттерн синхронизации потоков | 2 |  | ",
       "type": "table_row"
     },
@@ -760,7 +760,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Системное программирование | 5 | Анализ утечек памяти с Valgrind Memcheck\nЦель: научиться выявлять и исправлять утечки памяти | 2 |  | ",
       "type": "table_row"
     },
@@ -769,7 +769,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Системное программирование | 6 | Разработка собственного аллокатора памяти\nЦель: понять принципы работы malloc/free | 2 |  | ",
       "type": "table_row"
     },
@@ -778,7 +778,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Системное программирование | 7 | IPC через shared memory и POSIX mqueue\nЦель: освоить межпроцессное взаимодействие | 2 |  | ",
       "type": "table_row"
     },
@@ -787,7 +787,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Системное программирование | 8 | TCP-сервер с неблокирующим I/O (epoll/select)\nЦель: создать масштабируемый сетевой сервер | 2 |  | ",
       "type": "table_row"
     },
@@ -796,7 +796,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 16 |  | ",
       "type": "table_row"
     },
@@ -805,7 +805,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ПЗ | Тема практического занятия | Трудоемкость, часы\nНомер раздела | № ПЗ | Тема практического занятия | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -814,7 +814,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1 | 1 | Написание Makefile и сборка многофайловых проектов на C | 4 |  | ",
       "type": "table_row"
     },
@@ -823,7 +823,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1 | 2 | Анализ вывода strace: системные вызовы реальных программ | 4 |  | ",
       "type": "table_row"
     },
@@ -832,7 +832,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2 | 3 | Отладка гонки данных с ThreadSanitizer | 4 |  | ",
       "type": "table_row"
     },
@@ -841,7 +841,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2 | 4 | Профилирование CPU-горячих точек с gprof и perf | 4 |  | ",
       "type": "table_row"
     },
@@ -850,7 +850,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3 | 5 | Работа с динамическими библиотеками (.so): создание и загрузка | 4 |  | ",
       "type": "table_row"
     },
@@ -859,7 +859,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3 | 6 | Написание драйвера-модуля ядра Linux (базовый) | 4 |  | ",
       "type": "table_row"
     },
@@ -868,7 +868,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4 | 7 | Реализация shell с поддержкой пайпов и перенаправлений | 4 |  | ",
       "type": "table_row"
     },
@@ -877,7 +877,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4 | 8 | Сравнительный анализ стратегий планирования процессов | 4 |  | ",
       "type": "table_row"
     },
@@ -886,7 +886,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "5 | 9 | Код-ревью: анализ ошибок в системном коде на C | 4 |  | ",
       "type": "table_row"
     },
@@ -895,7 +895,7 @@
       "title": "rpd_33.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 36 |  | ",
       "type": "table_row"
     },

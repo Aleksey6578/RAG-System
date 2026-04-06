@@ -747,7 +747,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ЛР | Название лабораторной работы | Трудоемкость, часы\nНомер раздела | № ЛР | Название лабораторной работы | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -756,7 +756,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Основы NLP | 1 | Предобработка текстов: токенизация, стемминг, векторизация TF-IDF | 2 |  | ",
       "type": "table_row"
     },
@@ -765,7 +765,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Основы NLP | 2 | Обучение Word2Vec на корпусе текстов и анализ семантических аналогий | 2 |  | ",
       "type": "table_row"
     },
@@ -774,7 +774,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Извлечение информации | 3 | Распознавание именованных сущностей с помощью spaCy и CRF | 2 |  | ",
       "type": "table_row"
     },
@@ -783,7 +783,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Извлечение информации | 4 | Извлечение отношений между сущностями для наполнения базы знаний | 2 |  | ",
       "type": "table_row"
     },
@@ -792,7 +792,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Трансформеры | 5 | Fine-tuning BERT для классификации текстов на русском языке | 2 |  | ",
       "type": "table_row"
     },
@@ -801,7 +801,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Знаниевые графы | 6 | Автоматическое построение знаниевого графа из научных статей с Neo4j | 2 |  | ",
       "type": "table_row"
     },
@@ -810,7 +810,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- | ИТОГО: | 12 | 2 |  | ",
       "type": "table_row"
     },
@@ -819,7 +819,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ПЗ | Тема практического занятия | Трудоемкость, часы\nНомер раздела | № ПЗ | Тема практического занятия | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -828,7 +828,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Основы NLP | 1 | Сравнение векторных представлений текстов по задаче семантического сходства | 2 |  | ",
       "type": "table_row"
     },
@@ -837,7 +837,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Извлечение информации | 2 | Оценка NER-систем по метрикам F1 на аннотированных корпусах | 2 |  | ",
       "type": "table_row"
     },
@@ -846,7 +846,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Извлечение информации | 3 | Методы разрешения кореференций и связывания сущностей с базой знаний | 2 |  | ",
       "type": "table_row"
     },
@@ -855,7 +855,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Трансформеры | 4 | Сравнительный анализ моделей BERT, XLNet, RoBERTa на задаче NLU | 2 |  | ",
       "type": "table_row"
     },
@@ -864,7 +864,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Знаниевые графы | 5 | Запросы к знаниевому графу через SPARQL и Cypher | 2 |  | ",
       "type": "table_row"
     },
@@ -873,7 +873,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Знаниевые графы | 6 | Разработка прототипа вопросно-ответной системы с базой знаний | 2 |  | ",
       "type": "table_row"
     },
@@ -882,7 +882,7 @@
       "title": "rpd_30.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- | ИТОГО: | 12 | 2 |  | ",
       "type": "table_row"
     },

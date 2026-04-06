@@ -3,52 +3,52 @@
   "generated_docx": "output_rpd.docx",
   "reference_source": "rpd_29.json",
   "reference_title": "Интеллектуальные системы управления",
-  "reference_mode": "jsonl",
-  "embedding_similarity": 0.9129,
+  "reference_mode": "docx",
+  "embedding_similarity": 0.9584,
+  "section_references": {},
   "metrics": {
     "competencies": {
-      "bleu": 0.1848,
-      "rouge1": 0.7368,
-      "rouge2": 0.3529,
-      "rougeL": 0.6316
+      "bleu": 0.1368,
+      "rouge1": 0.7778,
+      "rouge2": 0.375,
+      "rougeL": 0.6667
     },
     "outcomes": {
-      "bleu": 0.1357,
-      "rouge1": 0.5734,
-      "rouge2": 0.4681,
-      "rougeL": 0.5734
+      "bleu": 0.1491,
+      "rouge1": 0.6029,
+      "rouge2": 0.4776,
+      "rougeL": 0.5735
     },
     "content": {
-      "bleu": 0.0355,
-      "rouge1": 0.3099,
-      "rouge2": 0.1739,
-      "rougeL": 0.2817
+      "bleu": 0.2961,
+      "rouge1": 0.5414,
+      "rouge2": 0.3206,
+      "rougeL": 0.406
     },
     "lab_works": {
-      "bleu": 0.0,
-      "rouge1": 0.161,
-      "rouge2": 0.1282,
-      "rougeL": 0.161
+      "bleu": 0.176,
+      "rouge1": 0.4889,
+      "rouge2": 0.2791,
+      "rougeL": 0.4444
     },
     "practice": {
-      "bleu": 0.0,
-      "rouge1": 0.0,
-      "rouge2": 0.0,
-      "rougeL": 0.0,
-      "note": "empty_reference"
+      "bleu": 0.1823,
+      "rouge1": 0.4889,
+      "rouge2": 0.186,
+      "rougeL": 0.4
     },
     "bibliography": {
-      "bleu": 0.085,
-      "rouge1": 0.3425,
-      "rouge2": 0.257,
-      "rougeL": 0.3204
+      "bleu": 0.6042,
+      "rouge1": 0.7949,
+      "rouge2": 0.6579,
+      "rougeL": 0.7949
     },
     "overall": {
-      "bleu": 0.3287,
-      "rouge1": 0.6596,
-      "rouge2": 0.5235,
-      "rougeL": 0.5119
+      "bleu": 0.3449,
+      "rouge1": 0.6898,
+      "rouge2": 0.5678,
+      "rougeL": 0.5833
     }
   },
-  "timestamp": "2026-04-04T16:16:29"
+  "timestamp": "2026-04-06T10:51:23"
 }

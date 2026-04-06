@@ -747,7 +747,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ЛР | Название лабораторной работы | Трудоемкость, часы\nНомер раздела | № ЛР | Название лабораторной работы | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -756,7 +756,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Основы онтологий | 1 | Создание онтологии предметной области в Protégé | 2 |  | ",
       "type": "table_row"
     },
@@ -765,7 +765,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Языки онтологий | 2 | Описание классов и свойств в OWL 2 с использованием Manchester Syntax | 2 |  | ",
       "type": "table_row"
     },
@@ -774,7 +774,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Логический вывод | 3 | Применение решателя HermiT для выводов на онтологии | 2 |  | ",
       "type": "table_row"
     },
@@ -783,7 +783,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Логический вывод | 4 | SPARQL-запросы к онтологической базе знаний в Apache Jena | 2 |  | ",
       "type": "table_row"
     },
@@ -792,7 +792,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Применение онтологий | 5 | Построение базы знаний медицинской предметной области с выводом | 2 |  | ",
       "type": "table_row"
     },
@@ -801,7 +801,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Применение онтологий | 6 | Интеграция OWL-онтологии с программным приложением через OWL API | 2 |  | ",
       "type": "table_row"
     },
@@ -810,7 +810,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- | ИТОГО: | 12 | 2 |  | ",
       "type": "table_row"
     },
@@ -819,7 +819,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ПЗ | Тема практического занятия | Трудоемкость, часы\nНомер раздела | № ПЗ | Тема практического занятия | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -828,7 +828,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Основы онтологий | 1 | Анализ и сравнение существующих онтологий: FOAF, Dublin Core, Schema.org | 2 |  | ",
       "type": "table_row"
     },
@@ -837,7 +837,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Языки онтологий | 2 | Проектирование таксономии понятий и иерархии классов онтологии | 2 |  | ",
       "type": "table_row"
     },
@@ -846,7 +846,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Логический вывод | 3 | Формулировка запросов на SPARQL для извлечения знаний из базы | 2 |  | ",
       "type": "table_row"
     },
@@ -855,7 +855,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Логический вывод | 4 | Верификация согласованности онтологии и устранение противоречий | 2 |  | ",
       "type": "table_row"
     },
@@ -864,7 +864,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Применение онтологий | 5 | Разработка онтологии для предметной области кафедры ВТИК | 2 |  | ",
       "type": "table_row"
     },
@@ -873,7 +873,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Применение онтологий | 6 | Оценка качества онтологии: полнота, согласованность, применимость | 2 |  | ",
       "type": "table_row"
     },
@@ -882,7 +882,7 @@
       "title": "rpd_22.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- | ИТОГО: | 12 | 2 |  | ",
       "type": "table_row"
     },

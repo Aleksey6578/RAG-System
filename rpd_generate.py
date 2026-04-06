@@ -87,12 +87,13 @@ GENERATION = {"top_k": 8, "min_score": 0.45}
 # РПД других направлений или уровней подготовки (магистратура и т.п.).
 
 # [J] Максимальная длина контекста, передаваемого в LLM (символы).
-# Замечание: "Нет ограничения контекста — контекст может превышать окно модели".
-# Ограничиваем retrieved-контекст до 3000 символов ≈ 750-900 токенов
-# для русского текста. Это оставляет достаточно места в num_ctx=4096
-# для самого промпта и ответа LLM.
-# При превышении лишние части обрезаются с явной пометкой "[...обрезано...]".
-MAX_CONTEXT_CHARS = 3000
+# [FIX-CTX] ИСПРАВЛЕНО: поднято с 3000 до 6000 символов.
+# При qwen2.5:14b с num_ctx=8192 прежний лимит 3000 символов ≈ 750 токенов
+# занимал менее 10% окна — большинство из 8 retrieved-чанков обрезалось до
+# «[...контекст обрезан...]», LLM получал неполные примеры для ЛР/ПЗ.
+# 6000 символов ≈ 1500 токенов русского текста — безопасный запас:
+# оставшиеся ~6700 токенов покрывают промпт (~400) + ответ (~800) с большим запасом.
+MAX_CONTEXT_CHARS = 6000
 
 # [З-R2] Фильтрация чанков по section_type для каждого генерируемого раздела.
 # Добавлен "bibliography" для секции bibliography_main — ранее поиск шёл без
@@ -101,8 +102,14 @@ SECTION_TYPE_FILTER = {
     "competencies":     ["competencies", "learning_outcomes"],
     "outcomes":         ["competencies", "learning_outcomes"],
     "content":          ["content"],
-    "lab_works":        ["content", "assessment"],
-    "practice":         ["content", "assessment"],
+    # [FIX-STF] ИСПРАВЛЕНО: "assessment" убран из фильтров lab_works и practice.
+    # После [FIX-1б] в chunking.py тип "assessment" содержит только ФОС-бойлерплейт
+    # («не зачтено / зачтено», критерии оценки) — не имеет отношения к темам ЛР/ПЗ.
+    # Аналогичный вывод явно задокументирован в evaluate.py [FIX-MAP]: assessment → None.
+    # Включение assessment в retrieval давало нерелевантный контекст → LLM генерировал
+    # обобщённые темы вместо конкретных заданий из корпуса.
+    "lab_works":        ["content", "book_content"],
+    "practice":         ["content", "book_content"],
     "bibliography_main": ["bibliography", "place"],
 }
 
@@ -141,6 +148,111 @@ def _load_cache() -> None:
     except Exception as e:
         print(f"  ⚠️  Кэш не загружен: {e}")
 
+def _print_similar_disciplines(discipline: str, corpus_dir: str = "rpd_corpus",
+                                top_n: int = 5) -> None:
+    """
+    [SIM] Выводит top_n наиболее похожих дисциплин из корпуса до генерации.
+    Стратегия поиска названия (по убыванию приоритета):
+      1. chunks[0..4]['text'] первая строка → regex (NNNNN)Название
+      2. metadata['subject']
+      3. data_clean.jsonl → поле 'discipline'
+    """
+    import math, glob as _glob
+
+    def _cosine(a, b):
+        dot = sum(x * y for x, y in zip(a, b))
+        na  = math.sqrt(sum(x * x for x in a))
+        nb  = math.sqrt(sum(x * x for x in b))
+        return dot / (na * nb) if na and nb else 0.0
+
+    _CODE_RE = re.compile(r"^\(\d+\)\s*(.+)$")
+
+    title_by_src: dict = {}
+
+    # --- Стратегия 1: rpd_corpus/*.json ---
+    if os.path.isdir(corpus_dir):
+        for path in _glob.glob(os.path.join(corpus_dir, "*.json")):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    rec = json.load(f)
+                src = os.path.basename(path)
+                name = ""
+
+                # Сканируем первые 5 чанков — ищем строку вида (код)Дисциплина
+                for ch in rec.get("chunks", [])[:5]:
+                    for line in ch.get("text", "").split("\n"):
+                        line = line.strip()
+                        m = _CODE_RE.match(line)
+                        if m:
+                            name = m.group(1).strip()
+                            break
+                    if name:
+                        break
+
+                # Fallback: metadata['subject']
+                if not name:
+                    name = rec.get("metadata", {}).get("subject", "").strip()
+
+                if name:
+                    title_by_src[src] = name
+            except Exception:
+                continue
+
+    # --- Стратегия 2: data_clean.jsonl ---
+    if not title_by_src:
+        jsonl = "data_clean.jsonl"
+        if os.path.exists(jsonl):
+            seen: set = set()
+            try:
+                with open(jsonl, encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            rec  = json.loads(line)
+                            src  = rec.get("source", rec.get("title", ""))
+                            if not src or src in seen:
+                                continue
+                            seen.add(src)
+                            name = ""
+                            for line_text in rec.get("text", "").split("\n"):
+                                line_text = line_text.strip()
+                                m = _CODE_RE.match(line_text)
+                                if m:
+                                    name = m.group(1).strip()
+                                    break
+                            if name:
+                                title_by_src[src] = name
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+
+    if not title_by_src:
+        print("  ⚠️  [SIM] Корпус не найден — список похожих дисциплин недоступен")
+        return
+
+    query_vec = get_embedding(discipline)
+    if not query_vec:
+        print("  ⚠️  [SIM] Embedding недоступен — пропускаю поиск похожих")
+        return
+
+    scored = []
+    for src, name in title_by_src.items():
+        vec = get_embedding(name)
+        if vec:
+            scored.append((name, src, _cosine(query_vec, vec)))
+
+    if not scored:
+        return
+
+    scored.sort(key=lambda x: x[2], reverse=True)
+
+    print(f"\n📚 Похожие дисциплины в корпусе (топ-{top_n}):")
+    for i, (name, src, score) in enumerate(scored[:top_n], 1):
+        bar = "█" * int(score * 20)
+        print(f"  {i}. [{score:.3f}] {bar}  {name}  ({src})")
+    print()
+
+
 def _save_cache() -> None:
     """Сохраняет кэш в файл."""
     try:
@@ -178,8 +290,8 @@ SECTION_QUERIES = {
         "{discipline} лабораторная работа задание исследование программирование Python",
     ],
     "practice": [
-        "{discipline} практические занятия семинары перечень тем задач",
-        "{discipline} решение задач анализ данных вычислительный эксперимент методы",
+        "{discipline} практические занятия перечень тем задач методы алгоритмы",
+        "{discipline} решение задач моделирование синтез исследование системы",
     ],
     "bibliography_main": [
         "{discipline} учебник учебное пособие литература библиография",
@@ -278,13 +390,24 @@ def retrieve(section: str, discipline: str, section_types: list = None,
         # [B] Строим фильтр с доменными полями
         must_conditions: list = []
         if section_types:
-            must_conditions.append({
-                "should": [
-                    # [S] Используем "section_type" на верхнем уровне payload
-                    {"key": "section_type", "match": {"value": st}}
-                    for st in section_types
-                ]
-            })
+            if len(section_types) == 1:
+                # [FIX-SHOULD1] ИСПРАВЛЕНО: Qdrant отклоняет "should" с одним
+                # условием (HTTP 400). После удаления "assessment" из фильтров
+                # lab_works/practice section_types стал ["content"] — один элемент.
+                # При одном типе используем прямой match вместо should-обёртки.
+                # Баг был скрыт кэшем: content-секция тоже ["content"], но её
+                # retrieval был закэширован — 400 проявился только на lab_works/practice.
+                must_conditions.append(
+                    {"key": "section_type", "match": {"value": section_types[0]}}
+                )
+            else:
+                must_conditions.append({
+                    "should": [
+                        # [S] Используем "section_type" на верхнем уровне payload
+                        {"key": "section_type", "match": {"value": st}}
+                        for st in section_types
+                    ]
+                })
         if direction:
             must_conditions.append({"key": "direction", "match": {"value": direction}})
         if level:
@@ -534,8 +657,11 @@ _TABLE_PREDICATES: dict = {
 }
 
 
-def _table_header_set(table, max_rows: int = 3) -> frozenset:
-    """Собирает множество уникальных текстов ячеек из первых max_rows строк."""
+def _table_header_set(table, max_rows: int = 5) -> frozenset:
+    """Собирает множество уникальных текстов ячеек из первых max_rows строк.
+    [FIX-HDR5] Поднят с 3 до 5: в шаблонах УГНТУ заголовки таблиц
+    (work_types, fos) иногда занимают 4 строки (двойная шапка).
+    При max_rows=3 «Вид учебной работы» в строке 4 → find_table вернул None."""
     texts = set()
     for row in table.rows[:max_rows]:
         seen_tc = set()
@@ -609,10 +735,15 @@ def fill_annotation_table(
     # --- Строим содержимое ячеек ---
 
     # [1] Компетенции с индикаторами
+    # [FIX-ANN] Indicator берётся из Z-outcomes вместо hardcoded строки.
+    # Раньше "-{code}.1 Применяет методы..." был одинаков для всех 5 компетенций.
+    _ann_z_texts = [t for ot, t in outcomes if ot == "\u0417"] if outcomes else []
     comp_lines = []
-    for code, desc in competencies:
+    for comp_idx, (code, desc) in enumerate(competencies):
         comp_lines.append(f" {code} {desc}:")
-        comp_lines.append(f"-{code}.1 Применяет методы и инструменты дисциплины")
+        _ind_text = _ann_z_texts[comp_idx % len(_ann_z_texts)][:60] if _ann_z_texts \
+            else "Применяет методы и инструменты дисциплины"
+        comp_lines.append(f"-{code}.1 Знает {_ind_text}")
     comp_text = "\n".join(comp_lines)
 
     # [4][6][8] Группируем outcomes по типу
@@ -845,7 +976,15 @@ def fill_doc_header(doc: Document, discipline: str, code: str,
         "реферат", "доклад", "лабораторная работа",
         "письменный и устный опрос", "тест",
         "расчётно-графическая работа",
+        # [Д-4] Промежуточная строка между видом оценивания и [] в Приложении В.
+        # Структура шаблона: «Реферат.» → «Перечень вопросов...:» → «[]»
+        # prev_txt при встрече [] = эта строка, а не «реферат» → без неё
+        # fill_doc_header заменял [] на label вместо пропуска для fill_appendix_v.
+        "перечень вопросов (задач, заданий, тем, комплекта тестовых заданий):",
     }
+    # [Д-2] Флаг блока «Темы для СРО» — [] внутри него НЕ заменяются
+    # дисциплинарным лейблом: их обрабатывает fill_sro_topic_paragraphs().
+    _in_sro_block = False
     prev_txt = ""
 
     def _set_para(para, text: str) -> None:
@@ -860,6 +999,17 @@ def fill_doc_header(doc: Document, discipline: str, code: str,
 
     for para in doc.paragraphs:
         txt = para.text.strip()
+
+        # [Д-2] SRO-блок: отслеживаем вход/выход
+        if "Темы для самостоятельной работы обучающихся" in txt:
+            _in_sro_block = True
+        elif _in_sro_block and re.match(r"^\d+\.", txt):
+            _in_sro_block = False
+
+        # [Д-2] Внутри SRO-блока [] заменяет fill_sro_topic_paragraphs — пропускаем
+        if _in_sro_block:
+            prev_txt = txt
+            continue
 
         if not first_label_done and txt == "[]":
             _set_para(para, label)
@@ -910,7 +1060,70 @@ def set_cell_text(cell, text: str) -> None:
         cell.paragraphs[0].runs[0].text = text
 
 
-# [FIX-AppV] Заполнение перечней вопросов/заданий в Приложении В.
+# [Д-2] Заполнение блока «Темы для самостоятельной работы».
+# Шаблон содержал жёстко вшитые rpd_1-темы («Организация НИД в России» и т.п.)
+# вместо []. После исправления шаблона [125],[127],[129] → [] в блоке 6 слотов:
+#   чётные (0,2,4) — имя раздела  →  sections[i]
+#   нечётные (1,3,5) — перечень тем  →  "(код)Дисциплина" (fill_doc_header пропустил)
+# fill_doc_header скипает весь SRO-блок; эта функция заполняет его явно.
+def fill_sro_topic_paragraphs(doc: Document, topics: list, label: str) -> None:
+    sections = [t for t in topics if re.match(r"^Раздел\s*\d+", t)]
+    if not sections:
+        return
+
+    # [FIX-SRO-TOPICS] ИСПРАВЛЕНО: нечётные слоты заполнялись label=(code)discipline.
+    # Теперь — конкретными темами раздела (Тема X.Y.) в виде краткого перечня.
+    # Алгоритм: проходим topics, группируем Тема-элементы по предшествующему Разделу.
+    section_subtopics: list[str] = []
+    current: list[str] = []
+    for t in topics:
+        if re.match(r"^Раздел\s*\d+", t):
+            # Сохраняем накопленные темы предыдущего раздела
+            if current or section_subtopics:
+                section_subtopics.append("; ".join(current) if current else label)
+                current = []
+        elif re.match(r"^Тема\s+\d", t):
+            # Убираем «Тема X.Y. » — оставляем только название
+            name = re.sub(r"^Тема\s+[\d.]+\s*", "", t).strip()
+            current.append(name)
+    # Последний раздел
+    section_subtopics.append("; ".join(current) if current else label)
+
+    in_block   = False
+    slot_idx   = 0
+    sec_idx    = 0
+
+    for para in doc.paragraphs:
+        txt = para.text.strip()
+
+        if "Темы для самостоятельной работы обучающихся" in txt:
+            in_block = True
+            continue
+
+        if in_block:
+            # Выход из блока: начало следующего пронумерованного раздела РПД
+            if re.match(r"^\d+\.", txt) and "Раздел" not in txt:
+                break
+
+            if txt == "[]":
+                if para.runs:
+                    if slot_idx % 2 == 0:              # имя раздела
+                        text = sections[sec_idx] if sec_idx < len(sections) else label
+                        sec_idx += 1
+                    else:                               # перечень тем раздела
+                        idx = sec_idx - 1
+                        text = (
+                            section_subtopics[idx]
+                            if 0 <= idx < len(section_subtopics)
+                            else label
+                        )
+                    para.runs[0].text = text
+                    for r in para.runs[1:]:
+                        r.text = ""
+                slot_idx += 1
+
+
+
 # fill_doc_header пропускает [] после заголовков видов оценивания —
 # их заполняет эта функция на основе тематического плана дисциплины.
 def fill_appendix_v(doc: Document, discipline: str, topics: list) -> None:
@@ -931,12 +1144,20 @@ def fill_appendix_v(doc: Document, discipline: str, topics: list) -> None:
     topics_list   = "\n".join(f"- {s}" for s in sections)
     topics_inline = "; ".join(sections)
 
+    # [FIX-AppV-DOK] Доклад строится из подтем (Тема X.Y.), а не разделов.
+    # Раньше реферат/доклад/опрос — одинаковые topics_list → дублирование контента.
+    subtopics = [
+        re.sub(r"^Тема\s+[\d.]+\s*", "", t).strip()
+        for t in topics if re.match(r"^Тема\s+[\d.]", t)
+    ][:6]
+    subtopics_list = "\n".join(f"- {s}" for s in subtopics) if subtopics else topics_list
+
     _TEMPLATES = {
         "реферат": (
             f"Темы рефератов по дисциплине «{discipline}»:\n{topics_list}"
         ),
         "доклад": (
-            f"Темы докладов по дисциплине «{discipline}»:\n{topics_list}"
+            f"Темы докладов по дисциплине «{discipline}»:\n{subtopics_list}"
         ),
         "лабораторная работа": (
             f"Перечень лабораторных работ охватывает разделы: {topics_inline}"
@@ -953,17 +1174,41 @@ def fill_appendix_v(doc: Document, discipline: str, topics: list) -> None:
         ),
     }
 
-    prev_txt = ""
+    # [Д-4 ИСПРАВЛЕНО]: прежде отслеживался только prev_txt (один шаг назад).
+    # Структура шаблона: «Реферат.» → «Перечень вопросов...:» → «[]»
+    # При встрече [] prev_txt = «Перечень вопросов...», а не «реферат» →
+    # _TEMPLATES не срабатывал, fill_doc_header подставлял label вместо перечня.
+    # Теперь last_assessment сохраняется до встречи [] вне зависимости от числа
+    # промежуточных параграфов.
+    last_assessment: str | None = None
     for para in doc.paragraphs:
-        txt = para.text.strip()
-        key = prev_txt.strip().lower()
-        if txt == "[]" and key in _TEMPLATES:
-            content = _TEMPLATES[key]
+        txt     = para.text.strip()
+        txt_key = txt.lower().rstrip(".")
+
+        # Заголовок вида оценивания — запоминаем
+        # [Фикс Д-AppV] txt_key in _TEMPLATES давал промах для составных
+        # заголовков вида «Доклад, сообщение» → ключ «доклад» не находился
+        # точным совпадением. Теперь ищем ключ как подстроку заголовка.
+        # ВАЖНО: startswith, а НЕ `k in txt_key` — «тест» найдётся как
+        # подстрока в «тестовых заданий» и перезапишет last_assessment.
+        matched_key = next((k for k in _TEMPLATES if txt_key.startswith(k)), None)
+        if matched_key:
+            last_assessment = matched_key
+            continue
+
+        # [] с активным last_assessment — заполняем и сбрасываем
+        if txt == "[]" and last_assessment is not None:
+            content = _TEMPLATES[last_assessment]
             if para.runs:
                 para.runs[0].text = content
                 for r in para.runs[1:]:
                     r.text = ""
-        prev_txt = txt
+            last_assessment = None
+            continue
+
+        # Выход из зоны Приложения В — сброс
+        if re.match(r"^\d+\.", txt) or txt.startswith("СОГЛАСОВАНО"):
+            last_assessment = None
 
 
 # ---------------------------------------------------------------------------
@@ -1127,6 +1372,26 @@ def parse_outcomes(text: str) -> list:
 
     VLADEET_PREFIXES = ("навыками", "методами", "инструментами", "технологиями",
                         "опытом", "практикой", "способностью")
+
+    # [FIX-ZUV] Валидация З и У симметрична В:
+    # З  — должно описывать ЗНАНИЕ (существительные), не действие. Если начинается
+    #      с глагола-действия → обёртываем в «знание: <текст>» или переставляем.
+    # У  — должно начинаться с инфинитива (применять, разрабатывать и т.п.).
+    #      Если не начинается → добавляем «применять».
+    _ACTION_VERBS = (
+        "применять", "разрабатыва", "анализирова", "использова",
+        "реализовыва", "проектирова", "оценива", "выполнять",
+        "создавать", "строить", "моделирова", "формирова",
+        "составлять", "решать", "описыва", "обеспечива",
+    )
+    _INFINITIVE_PREFIXES = (
+        "применять", "разрабатыва", "анализирова", "использова",
+        "реализовыва", "проектирова", "оценива", "выполнять",
+        "создавать", "строить", "моделирова", "формирова",
+        "составлять", "решать", "описыва", "исследова", "обеспечива",
+        "разрабатывать",
+    )
+
     fixed = []
     for otype, otext in result:
         if otype == "В":
@@ -1144,6 +1409,45 @@ def parse_outcomes(text: str) -> list:
                         ln = "навыками " + ln[0].lower() + ln[1:]
                 fixed_lines.append(ln)
             fixed.append((otype, "\n".join(fixed_lines)))
+
+        elif otype == "З":
+            # З-результат описывает знание: существительные/конструкции, не глагол-действие.
+            # Если LLM написал «применять методы» → это У-уровень, исправляем.
+            fixed_lines = []
+            for ln in otext.split("\n"):
+                ln = ln.strip()
+                if not ln:
+                    continue
+                ll = ln.lower()
+                if any(ll.startswith(v) for v in _ACTION_VERBS):
+                    # Глагол → снимаем его, превращаем в существительное-конструкцию
+                    ln = re.sub(
+                        r"^(применять|использовать|разрабатывать|анализировать|"
+                        r"реализовывать|проектировать|оценивать|выполнять|"
+                        r"создавать|строить|моделировать|формировать|"
+                        r"составлять|решать|описывать|обеспечивать)\s+",
+                        "",
+                        ln, flags=re.I,
+                    ).strip()
+                    if ln:
+                        ln = ln[0].upper() + ln[1:]
+                fixed_lines.append(ln)
+            fixed.append((otype, "\n".join(fixed_lines)))
+
+        elif otype == "У":
+            # У-результат должен начинаться с инфинитива действия.
+            # Если LLM написал существительное/«знание» → добавляем «применять».
+            fixed_lines = []
+            for ln in otext.split("\n"):
+                ln = ln.strip()
+                if not ln:
+                    continue
+                ll = ln.lower()
+                if not any(ll.startswith(p) for p in _INFINITIVE_PREFIXES):
+                    ln = "применять " + ln[0].lower() + ln[1:]
+                fixed_lines.append(ln)
+            fixed.append((otype, "\n".join(fixed_lines)))
+
         else:
             fixed.append((otype, otext))
 
@@ -1366,6 +1670,25 @@ def parse_list_json_with_section(text: str, min_items: int = 3) -> list | None:
         return None
 
 
+def _normalize_section_assignment(items: list, n_sections: int) -> list:
+    """
+    [Фикс Д-SecRot] Принудительно перезаписывает поле 'section' по
+    детерминированному паттерну 1,1,...,2,2,...,3,3,...
+
+    Устраняет ошибки LLM при назначении раздела — например, когда модель
+    возвращает section:1 для 4-го ПЗ вместо ожидаемого section:2.
+    Вызывается после gen_with_json_retry для lab_works и practice.
+    """
+    if n_sections < 1 or not items:
+        return items
+    n = len(items)
+    per_sec = max(1, n // n_sections)
+    for i, item in enumerate(items):
+        if isinstance(item, dict):
+            item["section"] = min((i // per_sec) + 1, n_sections)
+    return items
+
+
 def parse_list(text: str, discipline: str = "", min_items: int = 3) -> list:
     """[A] Парсит список ЛР/ПЗ: JSON-режим → regex-fallback.
     [БАГ 3 ИСПРАВЛЕНО]: добавлен параметр min_items (ранее был захардкожен как 3).
@@ -1445,42 +1768,80 @@ def gen_bibliography(discipline: str, direction: str = "", level: str = "", cfg:
         return any(m in dl for m in _PLACEHOLDER_MARKERS)
 
     def _make_fallback_main() -> list:
-        """Реальные учебники по ИИ/МО, доступные в российских ЭБС."""
-        return [
-            {
-                "type": "Основная литература",
-                "purpose": "Для изучения теории;",
-                "desc": (
-                    "Флах, П. Машинное обучение : наука и искусство построения алгоритмов, "
-                    "которые извлекают знания из данных / П. Флах ; пер. с англ. "
-                    "А. А. Слинкина. — Москва : ДМК Пресс, 2015. — 400 с."
-                ),
-                "url": "http://www.znanium.com",
-                "coeff": "1.00",
-            },
-            {
-                "type": "Основная литература",
-                "purpose": "Для изучения теории;Для выполнения СРО;",
-                "desc": (
-                    "Осовский, С. Нейронные сети для обработки информации : учебное пособие / "
-                    "С. Осовский ; пер. с польск. И. Д. Рудинского. — Москва : "
-                    "Финансы и статистика, 2002. — 344 с."
-                ),
-                "url": "http://www.znanium.com",
-                "coeff": "1.00",
-            },
-            {
-                "type": "Дополнительная литература",
-                "purpose": "Для изучения теории;",
-                "desc": (
-                    "Рассел, С. Искусственный интеллект : современный подход / "
-                    "С. Рассел, П. Норвиг ; пер. с англ. — 4-е изд. — Москва : "
-                    "Вильямс, 2022. — 1408 с."
-                ),
-                "url": "http://biblio-online.ru",
-                "coeff": "0.50",
-            },
-        ]
+        """
+        [FIX-BIB-DISC] Fallback библиографии привязан к домену дисциплины.
+        Прежде всегда возвращались книги по МО/нейронным сетям независимо от дисциплины.
+        Теперь ключевые слова в названии выбирают подходящий набор учебников.
+        Этот путь срабатывает только если config.json не содержит main_bibliography
+        И LLM вернул галлюцинированные записи — в продакшене почти не используется.
+        """
+        _d = discipline.lower()
+        # --- Домены ---
+        if any(k in _d for k in ("интеллект", "нейрон", "machine", "deep", "обучен")):
+            # ИИ / машинное обучение / нейронные сети
+            return [
+                {"type": "Основная литература", "purpose": "Для изучения теории;",
+                 "desc": "Флах, П. Машинное обучение : наука и искусство построения алгоритмов / П. Флах. — Москва : ДМК Пресс, 2015. — 400 с.",
+                 "url": "http://www.znanium.com", "coeff": "1.00"},
+                {"type": "Основная литература", "purpose": "Для изучения теории;Для выполнения СРО;",
+                 "desc": "Рассел, С. Искусственный интеллект : современный подход / С. Рассел, П. Норвиг. — 4-е изд. — Москва : Вильямс, 2022. — 1408 с.",
+                 "url": "http://www.znanium.com", "coeff": "1.00"},
+                {"type": "Дополнительная литература", "purpose": "Для изучения теории;",
+                 "desc": "Осовский, С. Нейронные сети для обработки информации / С. Осовский. — Москва : Финансы и статистика, 2002. — 344 с.",
+                 "url": "http://biblio-online.ru", "coeff": "0.50"},
+            ]
+        elif any(k in _d for k in ("баз", "данн", "sql", "субд")):
+            # Базы данных
+            return [
+                {"type": "Основная литература", "purpose": "Для изучения теории;",
+                 "desc": "Дейт, К. Дж. Введение в системы баз данных / К. Дж. Дейт. — 8-е изд. — Москва : Вильямс, 2005. — 1328 с.",
+                 "url": "http://www.znanium.com", "coeff": "1.00"},
+                {"type": "Основная литература", "purpose": "Для изучения теории;Для выполнения СРО;",
+                 "desc": "Харинатх, С. Microsoft SQL Server 2012 : основы T-SQL / С. Харинатх, С. Куинн. — Москва : Эком, 2014. — 528 с.",
+                 "url": "http://e.lanbook.com", "coeff": "1.00"},
+                {"type": "Дополнительная литература", "purpose": "Для изучения теории;",
+                 "desc": "Малыхина, М. П. Базы данных : основы, проектирование, использование / М. П. Малыхина. — СПб. : БХВ-Петербург, 2007. — 512 с.",
+                 "url": "http://biblio-online.ru", "coeff": "0.50"},
+            ]
+        elif any(k in _d for k in ("сет", "телеком", "протокол", "tcp", "ip", "коммуник")):
+            # Компьютерные сети / телекоммуникации
+            return [
+                {"type": "Основная литература", "purpose": "Для изучения теории;",
+                 "desc": "Олифер, В. Г. Компьютерные сети : принципы, технологии, протоколы / В. Г. Олифер, Н. А. Олифер. — 5-е изд. — СПб. : Питер, 2016. — 992 с.",
+                 "url": "http://www.znanium.com", "coeff": "1.00"},
+                {"type": "Основная литература", "purpose": "Для изучения теории;Для выполнения СРО;",
+                 "desc": "Таненбаум, Э. Компьютерные сети / Э. Таненбаум, Д. Уэзеролл. — 5-е изд. — СПб. : Питер, 2012. — 960 с.",
+                 "url": "http://e.lanbook.com", "coeff": "1.00"},
+                {"type": "Дополнительная литература", "purpose": "Для изучения теории;",
+                 "desc": "Гук, М. Аппаратные средства локальных сетей / М. Гук. — СПб. : Питер, 2002. — 576 с.",
+                 "url": "http://biblio-online.ru", "coeff": "0.50"},
+            ]
+        elif any(k in _d for k in ("программ", "разработ", "web", "веб", "приложен")):
+            # Разработка ПО / веб
+            return [
+                {"type": "Основная литература", "purpose": "Для изучения теории;",
+                 "desc": "Фаулер, М. Архитектура корпоративных программных приложений / М. Фаулер. — Москва : Вильямс, 2012. — 544 с.",
+                 "url": "http://www.znanium.com", "coeff": "1.00"},
+                {"type": "Основная литература", "purpose": "Для изучения теории;Для выполнения СРО;",
+                 "desc": "Мартин, Р. Чистый код : создание, анализ и рефакторинг / Р. Мартин. — СПб. : Питер, 2019. — 464 с.",
+                 "url": "http://e.lanbook.com", "coeff": "1.00"},
+                {"type": "Дополнительная литература", "purpose": "Для изучения теории;",
+                 "desc": "Гамма, Э. Приёмы объектно-ориентированного проектирования : паттерны проектирования / Э. Гамма [и др.]. — СПб. : Питер, 2015. — 366 с.",
+                 "url": "http://biblio-online.ru", "coeff": "0.50"},
+            ]
+        else:
+            # Общий IT/CS — достаточно нейтральные книги
+            return [
+                {"type": "Основная литература", "purpose": "Для изучения теории;",
+                 "desc": "Кормен, Т. Алгоритмы : построение и анализ / Т. Кормен [и др.] ; пер. с англ. — 3-е изд. — Москва : Вильямс, 2013. — 1328 с.",
+                 "url": "http://www.znanium.com", "coeff": "1.00"},
+                {"type": "Основная литература", "purpose": "Для изучения теории;Для выполнения СРО;",
+                 "desc": "Дональд, Э. Кнут. Искусство программирования. Том 1 / Э. Кнут. — Москва : Вильямс, 2017. — 832 с.",
+                 "url": "http://e.lanbook.com", "coeff": "1.00"},
+                {"type": "Дополнительная литература", "purpose": "Для изучения теории;",
+                 "desc": "Таненбаум, Э. Архитектура компьютера / Э. Таненбаум, Т. Остин. — 6-е изд. — СПб. : Питер, 2013. — 816 с.",
+                 "url": "http://biblio-online.ru", "coeff": "0.50"},
+            ]
 
     def _make_fallback_method(disc: str) -> list:
         """УГНТУ-пособия — всегда используем fallback (LLM не знает конкретных пособий кафедры)."""
@@ -1712,19 +2073,24 @@ def fill_outcomes_table(doc: Document, competencies: list, outcomes: list):
         ]):
             result_code = f"{otype}({code})"
             indicator_num = type_idx + 1
-            _desc_clean = re.sub(r"^Способен\s+", "", desc, flags=re.IGNORECASE).strip()
-            indicator = f"{code}.{indicator_num} {_ind_verb[otype]} {_desc_clean[:80]}"
+            # [FIX-IND] Индикатор строится из outcome-текста, а не описания
+            # компетенции. Раньше _desc_clean был одинаков для З/У/В одной
+            # компетенции → все три индикатора имели одинаковый текст (.1=.2=.3).
+            # Теперь rotated вычисляется до indicator и используется в нём:
+            # УК-1.1 знать <текст З>, УК-1.2 уметь <текст У>, УК-1.3 владеть <текст В>.
+            rotated = items[idx % len(items):] + items[:idx % len(items)]
+            _ind_verbs = {"З": "знать", "У": "уметь", "В": "владеть"}
+            # [FIX-IND2] qualifier добавляется к indicator для уникальности.
+            # Без него idx=0 и idx=3 дают одинаковый rotated[0] при len(items)<=3.
+            _ind_qual = qualifiers[idx % len(qualifiers)]
+            indicator = f"{code}.{indicator_num} {_ind_verbs[otype]} {rotated[0][:50]} {_ind_qual}"
 
-            if len(items) == 1:
-                qualifier = qualifiers[idx % len(qualifiers)]
-                prefix = {"З": "Знать:", "У": "Уметь:", "В": "Владеть:"}[otype]
-                result_text = f"{prefix} {items[0]} {qualifier}"
-            else:
-                rotated = items[idx % len(items):] + items[:idx % len(items)]
-                prefix = {"З": "Знать:", "У": "Уметь:", "В": "Владеть:"}[otype]
-                result_text = f"{prefix} {rotated[0]}"
-                if len(rotated) > 1:
-                    result_text += f"\n{rotated[1]}"
+            # [FIX-DUP] qualifiers применяются к result_text для уникальности.
+            # При outcomes_count=9 → 3 items на тип; idx=3%3=0 → дубль idx=0.
+            # qualifier имеет 5 элементов → при N≤5 компетенций нет повторов.
+            prefix = {"З": "Знать:", "У": "Уметь:", "В": "Владеть:"}[otype]
+            qual = qualifiers[idx % len(qualifiers)]
+            result_text = f"{prefix} {rotated[0]} {qual}"
 
             rows.append([code, indicator, result_code, result_text])
 
@@ -1899,17 +2265,24 @@ def fill_t3_hours(doc: Document, semester: str, credits: int,
 
 
 def fill_t6_workload(doc: Document, lec: int, pz: int, lr: int, sro: int,
-                     semester: str):
+                     semester: str, exam_prep_hours: int = 0):
     t = find_table(doc, "work_types")
     if t is None:
         return
+    # [Д-5] Диагностика: убеждаемся что таблица найдена и содержит строки.
+    # [TABLE] в pandoc-выводе — артефакт сложных объединённых ячеек, не признак
+    # пустой таблицы. Если строк > 0 и print ниже выводится — таблица заполнена.
+    print(f"  ℹ️  Т6 work_types: найдена, строк={len(t.rows)}, ищу семестр={semester!r}")
     sem_col = None
     # [З-G5] ИСПРАВЛЕНО: нечёткий поиск столбца семестра
     sem_str = str(semester).strip()
     for header_row in t.rows[:4]:
         for j, cell in enumerate(header_row.cells):
             cell_text = cell.text.strip()
-            if cell_text == sem_str or sem_str in cell_text:
+            # [FIX-SEM] sem_str in cell_text давало ложные срабатывания:
+            # "7" совпадало с "17" и "27". Используем negative lookaround.
+            _sem_re = re.compile(r'(?<!\d)' + re.escape(sem_str) + r'(?!\d)')
+            if cell_text == sem_str or _sem_re.search(cell_text):
                 sem_col = j
                 break
         if sem_col is not None:
@@ -1935,16 +2308,41 @@ def fill_t6_workload(doc: Document, lec: int, pz: int, lr: int, sro: int,
     # как подстроку и ранее получали те же значения что и основные строки.
     # Исправление: требуем что строка НЕ содержит «on-line», «онлайн», «в т.ч.»,
     # «иная», «проектная», «освоение», «самостоятельная проект».
-    SKIP_PATTERNS = ("on-line", "онлайн", "в т.ч.", "иная", "проектная",
-                     "освоение", "самостоятельная проект", "подготовка к",
-                     "контролируем")  # [FIX-4] «контролируемая СРО» = 72 от шаблона
+    # [Т6-FIX-1] "иные" добавлен — строка "иные виды работ обучающегося"
+    # содержит "иные", а не "иная" → старый паттерн не срабатывал → [] оставался.
+    # [FIX-T6-SRO] "подготовка к" УБРАН из SKIP_PATTERNS — перенесён в kw_map
+    # как явные записи с точными ключами. Без этого "подготовка к лабораторным"
+    # получала "0" вместо реального значения hrs_prep, расходясь с T11 (СРО).
+    SKIP_PATTERNS = ("on-line", "онлайн", "в т.ч.", "иная", "иные", "проектная",
+                     "освоение", "самостоятельная проект",
+                     "контролируем",           # [FIX-4] «контролируемая СРО» = 72 от шаблона
+                     "выполнение и подготовка к защит",  # [FIX-T6-ZERO2] ИСПРАВЛЕНО:
+                     # строки «выполнение и подготовка к защите курсового проекта» и
+                     # «выполнение и подготовка к защите РГР работы» не совпадали ни
+                     # с kw_map, ни с SKIP_PATTERNS → clear_data_columns зачищал cells[≥2],
+                     # но cells[1] («Всего») оставался с «[]» из шаблона.
+                     # Один паттерн покрывает обе строки (общий префикс).
+                     )
+
+    # [FIX-T6-SRO] Разбивка СРО согласована с fill_t11_sro (одинаковые коэффициенты).
+    # Прежде "изучение учебного" = sro (весь объём), "подготовка к лабораторным" = 0.
+    # Теперь: total СРО распределяется на три подвида как в T11, что устраняет
+    # расхождение между T6 и T11 при нормоконтроле.
+    hrs_study = round(sro * 0.20)           # изучение вынесенного материала
+    hrs_rgr   = round(sro * 0.20)           # РГР / реферат
+    # [FIX-EXAM-PREP] exam_prep_hours вычитается из СРО явно — ранее было 0
+    # при любом exam_type, что давало логическое несоответствие для "экзамен".
+    hrs_prep  = sro - hrs_study - hrs_rgr - exam_prep_hours   # подготовка к ЛР/ПЗ
 
     kw_map = {
-        "контактная":            total_contact,
-        "лекции":                lec,
-        "практические занятия":  pz,
-        "лабораторные работы":   lr,
+        "контактная":             total_contact,
+        "лекции":                 lec,
+        "подготовка к лаборатор": hrs_prep,
+        "подготовка к сдач":      exam_prep_hours,  # [FIX-EXAM-PREP] было 0
+        "практические занятия":   pz,
+        "лабораторные работы":    lr,
         "самостоятельная работа": sro,
+        "изучение учебного":      hrs_study,
     }
 
     for row in t.rows:
@@ -2038,7 +2436,11 @@ def fill_t21_fos(doc: Document, competencies: list, topics: list,
         "У": f"применять методы {discipline} для решения практических задач",
         "В": f"навыками работы с инструментами {discipline}",
     }
-    _indicator_verbs = {"З": "Знает", "У": "Умеет применять", "В": "Владеет"}
+    _indicator_verbs = {"З": "Знает", "У": "Умеет", "В": "Владеет"}
+    # [FIX-T21-VERB] ИСПРАВЛЕНО: было "Умеет применять" → при конкатенации с
+    # _desc_cut компетенции (которая начинается с «применять…») получалось
+    # «ОПК-2.2 Умеет применять применять методы…» — двойной глагол.
+    # Теперь verb="Умеет", indicator становится «ОПК-2.2 Умеет применять…».
     _indicator_objects = {
         "З": "основные методы и принципы в области «{sec}»",
         "У": "методы дисциплины применительно к разделу «{sec}»",
@@ -2104,6 +2506,19 @@ def validate_generation(cfg: dict, hours: dict, competencies: list,
             f"⚠️  Сумма часов {actual_total} ≠ {expected_total} из config.json"
         )
 
+    # [З-ЧАС] ДОБАВЛЕНО: проверка ФГОС-требования credits × 36 == hours_total.
+    # Без этой проверки несоответствие (например credits=4, hours=140) проходило
+    # валидацию — в РПД появлялись некорректные данные, которые выявлялись только
+    # при проверке нормоконтролем.
+    credits = cfg.get("credits", 0)
+    if credits:
+        expected_by_credits = credits * 36
+        if actual_total != expected_by_credits:
+            warnings.append(
+                f"⚠️  credits × 36 = {credits} × 36 = {expected_by_credits}, "
+                f"но сумма часов = {actual_total} — нарушение ФГОС"
+            )
+
     sections = [t for t in topics if re.match(r"^Раздел\s*\d+", t)]
     if not sections:
         warnings.append("⚠️  Разделы дисциплины не сгенерированы (topics пуст)")
@@ -2165,6 +2580,7 @@ PROMPTS = {
 - У: что умеет — начинается с глагола (применять, разрабатывать, анализировать...)
 - В: чем владеет — начинается с «навыками», «методами» или «инструментами»
 - ВСЕ 9 текстов УНИКАЛЬНЫ — каждый З, каждый У, каждый В отличаются друг от друга
+- каждый текст — ОДНА краткая фраза (не список, не перечисление через запятую)
 - Не повторяй одни и те же слова в разных строках одного типа
 - Содержат специфику «{discipline}», НЕ копируй примеры
 
@@ -2267,9 +2683,10 @@ PROMPTS = {
 {sections_list}
 
 Требования:
-- каждое занятие — решение конкретной задачи с Python-инструментами
-- все 6 тем разные, чередовать: анализ данных, алгоритм, эксперимент с моделью
+- каждое занятие — решение конкретной задачи по методам дисциплины
+- все 6 тем разные, чередовать: анализ, синтез, моделирование, эксперимент
 - темы ПЗ привязаны к конкретным методам из ключевых тем выше
+- формулировка: глагол + метод/объект/задача («Анализ...», «Синтез...», «Решение задач...», «Моделирование...»)
 - укажи номер раздела (1, 2 или 3) к которому относится ПЗ
 ВЕРНИ ТОЛЬКО JSON-массив (без пояснений, без markdown):
 [
@@ -2361,6 +2778,9 @@ def main(config_path: Optional[str] = None, clear_cache: bool = False):
 
     # [З-R5] Загружаем персистентный кэш эмбеддингов и retrieval-запросов.
     _load_cache()
+
+    # [SIM] Показываем похожие дисциплины до генерации — ориентир для преподавателя
+    _print_similar_disciplines(discipline, corpus_dir="rpd_corpus")
 
     # [З-5] Переопределяем параметры retrieval из config.json, если заданы.
     if "retrieval_top_k" in cfg:
@@ -2457,12 +2877,45 @@ def main(config_path: Optional[str] = None, clear_cache: bool = False):
     raw: dict = {}
 
     # --- Шаг 1: компетенции и результаты обучения ---
-    raw["competencies"], competencies = gen_with_json_retry(
-        "competencies", discipline, PROMPTS["competencies"],
-        parser_json=lambda t: parse_competencies_json(t),
-        parser_fallback=lambda t: parse_competencies(t, codes=codes_list),
-        direction=direction, level=level, **base_vars
-    )
+    # [FIX-FGOS] Если config.json содержит fgos_competencies — берём реальные
+    # формулировки напрямую, минуя LLM. Устраняет галлюцинации кодов компетенций.
+    # Фильтруем только те коды, которые указаны в competency_codes конфига.
+    _fgos = cfg.get("fgos_competencies", {})
+    if _fgos and isinstance(_fgos, dict):
+        competencies = [
+            (code, _fgos[code])
+            for code in codes_list
+            if code in _fgos
+        ]
+        # Коды из competency_codes без записи в fgos_competencies — генерируем LLM
+        _missing_codes = [c for c in codes_list if c not in _fgos]
+        if _missing_codes:
+            print(f"  ⚠️  [FGOS] Коды не найдены в fgos_competencies: {_missing_codes} — генерирую LLM")
+            _missing_str = ", ".join(_missing_codes)
+            _miss_vars = {**base_vars,
+                          "competency_codes": _missing_str,
+                          "competency_codes_numbered": "\n".join(f"{i+1}. {c}" for i, c in enumerate(_missing_codes)),
+                          "competency_count": len(_missing_codes)}
+            _, _extra = gen_with_json_retry(
+                "competencies", discipline, PROMPTS["competencies"],
+                parser_json=lambda t: parse_competencies_json(t),
+                parser_fallback=lambda t: parse_competencies(t, codes=_missing_codes),
+                direction=direction, level=level, **_miss_vars
+            )
+            competencies += _extra
+        raw["competencies"] = json.dumps(
+            [{"code": c, "desc": d} for c, d in competencies], ensure_ascii=False
+        )
+        print(f"  ✅ [FGOS] Компетенции из fgos_competencies: {[c for c, _ in competencies]}")
+        _generation_log["competencies_source"] = "fgos_competencies (config.json)"
+    else:
+        raw["competencies"], competencies = gen_with_json_retry(
+            "competencies", discipline, PROMPTS["competencies"],
+            parser_json=lambda t: parse_competencies_json(t),
+            parser_fallback=lambda t: parse_competencies(t, codes=codes_list),
+            direction=direction, level=level, **base_vars
+        )
+        _generation_log["competencies_source"] = "llm"
 
     raw["outcomes"], outcomes = gen_with_json_retry(
         "outcomes", discipline, PROMPTS["outcomes"],
@@ -2526,10 +2979,10 @@ def main(config_path: Optional[str] = None, clear_cache: bool = False):
             ]
         elif _has_manage:
             topics = [
-                f"Раздел 1. Основы интеллектального управления",
+                f"Раздел 1. Основы интеллектуального управления",
                 f"Тема 1.1. Классификация и архитектуры ИСУ",
                 f"Тема 1.2. Адаптивное управление",
-                f"Раздел 2. Методы синтеза интеллектальных регуляторов",
+                f"Раздел 2. Методы синтеза интеллектуальных регуляторов",
                 f"Тема 2.1. Нейросетевые и нечёткие регуляторы",
                 f"Тема 2.2. Обучение с подкреплением в управлении",
                 f"Раздел 3. Применение {discipline}",
@@ -2567,6 +3020,7 @@ def main(config_path: Optional[str] = None, clear_cache: bool = False):
         parser_fallback=lambda t: [{"title": x, "section": None} for x in parse_list(t, discipline)],
         direction=direction, level=level, **content_vars
     )
+    lab_works = _normalize_section_assignment(lab_works, len(_secs))
 
     raw["practice"], practices = gen_with_json_retry(
         "practice", discipline, PROMPTS["practice"],
@@ -2574,6 +3028,7 @@ def main(config_path: Optional[str] = None, clear_cache: bool = False):
         parser_fallback=lambda t: [{"title": x, "section": None} for x in parse_list(t, discipline)],
         direction=direction, level=level, **content_vars
     )
+    practices = _normalize_section_assignment(practices, len(_secs))
 
     # --- Шаг 3: библиография ---
     print("  📚 Генерация библиографии...")
@@ -2616,11 +3071,22 @@ def main(config_path: Optional[str] = None, clear_cache: bool = False):
     # [FIX-AppV] Перечни вопросов в Приложении В — после fill_doc_header,
     # который пропустил [] после заголовков видов оценивания.
     fill_appendix_v(doc, discipline, topics)
+    # [Д-2] Заполняем блок «Темы для СРО» — fill_doc_header его пропускает
+    fill_sro_topic_paragraphs(doc, topics, label=f"({code}){discipline}")
 
     for name, fn, args in [
+        # [Д-1 ИСПРАВЛЕНО]: fill_t3_hours существовала, но не вызывалась →
+        # таблица Раздела 1 (семестр/часы) оставалась с [] в output.
+        ("Т3 Трудоёмкость",        fill_t3_hours,            (doc, semester,
+                                                               cfg.get("credits", 4),
+                                                               hours_total,
+                                                               hours_contact,
+                                                               hours_sro,
+                                                               exam_type)),
         ("Т4 Компетенции",         fill_competencies_table,  (doc, competencies)),
         ("Т5 Результаты обучения", fill_outcomes_table,      (doc, competencies, outcomes)),
-        ("Т6 Виды работы",         fill_t6_workload,         (doc, hours["lecture"], hours["practice"], hours["lab"], hours["self"], semester)),
+        ("Т6 Виды работы",         fill_t6_workload,         (doc, hours["lecture"], hours["practice"], hours["lab"], hours["self"], semester,
+                                                               cfg.get("exam_prep_hours", 9 if exam_type == "экзамен" else 0))),
         ("Т7 Темы",                fill_topics_table,        (doc, topics, semester, hours, codes_list)),
         ("Т8 Лекции",              fill_lectures_table,      (doc, topics, hours)),
         ("Т9 ЛР",                  fill_lab_table,           (doc, lab_works, topics, hours["lab"])),

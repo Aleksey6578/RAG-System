@@ -758,7 +758,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ЛР | Название лабораторной работы | Трудоемкость, часы\nНомер раздела | № ЛР | Название лабораторной работы | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -767,7 +767,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Математические основы | 1 | Реализация однослойного перцептрона с нуля на NumPy | 2 |  | ",
       "type": "table_row"
     },
@@ -776,7 +776,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Математические основы | 2 | Исследование функций активации и их производных | 2 |  | ",
       "type": "table_row"
     },
@@ -785,7 +785,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Многослойные перцептроны | 3 | Обучение MLP на датасете MNIST с подбором числа слоёв | 2 |  | ",
       "type": "table_row"
     },
@@ -794,7 +794,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Многослойные перцептроны | 4 | Реализация регуляризации Dropout и BatchNormalization | 2 |  | ",
       "type": "table_row"
     },
@@ -803,7 +803,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Сверточные нейронные сети | 5 | Построение CNN для классификации CIFAR-10 в PyTorch | 2 |  | ",
       "type": "table_row"
     },
@@ -812,7 +812,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Сверточные нейронные сети | 6 | Fine-tuning предобученной ResNet для задачи классификации | 2 |  | ",
       "type": "table_row"
     },
@@ -821,7 +821,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 12 |  | ",
       "type": "table_row"
     },
@@ -830,7 +830,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ПЗ | Тема практического занятия | Трудоемкость, часы\nНомер раздела | № ПЗ | Тема практического занятия | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -839,7 +839,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Математические основы | 1 | Матричные операции и вычисление градиентов вручную | 2 |  | ",
       "type": "table_row"
     },
@@ -848,7 +848,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Математические основы | 2 | Визуализация пространства признаков с помощью t-SNE и PCA | 2 |  | ",
       "type": "table_row"
     },
@@ -857,7 +857,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Многослойные перцептроны | 3 | Подбор гиперпараметров MLP с использованием Optuna | 2 |  | ",
       "type": "table_row"
     },
@@ -866,7 +866,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Сверточные нейронные сети | 4 | Анализ карт активаций (Grad-CAM) для интерпретации CNN | 2 |  | ",
       "type": "table_row"
     },
@@ -875,7 +875,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Рекуррентные сети | 5 | Обучение LSTM для прогнозирования временного ряда | 2 |  | ",
       "type": "table_row"
     },
@@ -884,7 +884,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Рекуррентные сети | 6 | Сравнение LSTM и GRU на задаче классификации текстов | 2 |  | ",
       "type": "table_row"
     },
@@ -893,7 +893,7 @@
       "title": "rpd_8.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 12 |  | ",
       "type": "table_row"
     },

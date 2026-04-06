@@ -715,7 +715,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ЛР | Название лабораторной работы | Трудоемкость, часы\nНомер раздела | № ЛР | Название лабораторной работы | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -724,7 +724,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Разработка мобильных приложени | 1 | Hello World на Flutter и React Native. Сравнение подходов\nЦель: настроить среду разработки и запустить первое приложение | 2 |  | ",
       "type": "table_row"
     },
@@ -733,7 +733,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Разработка мобильных приложени | 2 | Создание экранов и компонентов UI: Text, Button, Image, ListView\nЦель: освоить базовые элементы интерфейса | 2 |  | ",
       "type": "table_row"
     },
@@ -742,7 +742,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Разработка мобильных приложени | 3 | Реализация навигации между экранами\nЦель: научиться организовывать переходы и передачу данных | 2 |  | ",
       "type": "table_row"
     },
@@ -751,7 +751,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Разработка мобильных приложени | 4 | Работа с REST API: загрузка и отображение данных\nЦель: интегрировать внешний API в мобильное приложение | 2 |  | ",
       "type": "table_row"
     },
@@ -760,7 +760,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Разработка мобильных приложени | 5 | Управление состоянием приложения с помощью Provider или Redux\nЦель: освоить архитектурные паттерны | 2 |  | ",
       "type": "table_row"
     },
@@ -769,7 +769,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Разработка мобильных приложени | 6 | Локальное хранение данных: SharedPreferences и SQLite\nЦель: реализовать офлайн-функциональность | 2 |  | ",
       "type": "table_row"
     },
@@ -778,7 +778,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Разработка мобильных приложени | 7 | Работа с камерой, геолокацией и push-уведомлениями\nЦель: интегрировать нативные возможности устройства | 2 |  | ",
       "type": "table_row"
     },
@@ -787,7 +787,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Разработка мобильных приложени | 8 | Тестирование и профилирование мобильного приложения\nЦель: выявить и устранить узкие места производительности | 2 |  | ",
       "type": "table_row"
     },
@@ -796,7 +796,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 16 |  | ",
       "type": "table_row"
     },
@@ -805,7 +805,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ПЗ | Тема практического занятия | Трудоемкость, часы\nНомер раздела | № ПЗ | Тема практического занятия | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -814,7 +814,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1 | 1 | Анализ архитектуры популярных мобильных приложений | 4 |  | ",
       "type": "table_row"
     },
@@ -823,7 +823,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1 | 2 | Прототипирование UI в Figma, экспорт в код | 4 |  | ",
       "type": "table_row"
     },
@@ -832,7 +832,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2 | 3 | Реализация адаптивной вёрстки для разных экранов | 4 |  | ",
       "type": "table_row"
     },
@@ -841,7 +841,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2 | 4 | Интеграция аутентификации (Firebase Auth, OAuth) | 4 |  | ",
       "type": "table_row"
     },
@@ -850,7 +850,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3 | 5 | Оптимизация времени запуска приложения | 4 |  | ",
       "type": "table_row"
     },
@@ -859,7 +859,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3 | 6 | Написание unit-тестов для бизнес-логики | 4 |  | ",
       "type": "table_row"
     },
@@ -868,7 +868,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4 | 7 | Анализ кейсов: React Native vs Flutter vs нативная разработка | 4 |  | ",
       "type": "table_row"
     },
@@ -877,7 +877,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4 | 8 | Разработка MVP мобильного приложения по заданию | 4 |  | ",
       "type": "table_row"
     },
@@ -886,7 +886,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "5 | 9 | Подготовка к публикации: иконки, скриншоты, описание | 4 |  | ",
       "type": "table_row"
     },
@@ -895,7 +895,7 @@
       "title": "rpd_32.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 36 |  | ",
       "type": "table_row"
     },

@@ -747,7 +747,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ЛР | Название лабораторной работы | Трудоемкость, часы\nНомер раздела | № ЛР | Название лабораторной работы | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -756,7 +756,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Основы нейросимволического ИИ | 1 | Реализация KBANN: инициализация весов НС из логических правил | 2 |  | ",
       "type": "table_row"
     },
@@ -765,7 +765,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Извлечение знаний | 2 | Извлечение правил решений из обученной нейронной сети алгоритмом TREPAN | 2 |  | ",
       "type": "table_row"
     },
@@ -774,7 +774,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Интеграция логики и нейросетей | 3 | Построение Graph Neural Network для задачи вывода на онтологии | 2 |  | ",
       "type": "table_row"
     },
@@ -783,7 +783,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Интеграция логики и нейросетей | 4 | Реализация DeepProbLog для решения логической задачи с нейросетевыми предикатами | 2 |  | ",
       "type": "table_row"
     },
@@ -792,7 +792,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Интерпретируемость | 5 | Концептуальные бутылочные горлышки: обучение интерпретируемой НС | 2 |  | ",
       "type": "table_row"
     },
@@ -801,7 +801,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Интерпретируемость | 6 | Объяснение решений нейросимволической системы на задаче классификации | 2 |  | ",
       "type": "table_row"
     },
@@ -810,7 +810,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- | ИТОГО: | 12 | 2 |  | ",
       "type": "table_row"
     },
@@ -819,7 +819,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ПЗ | Тема практического занятия | Трудоемкость, часы\nНомер раздела | № ПЗ | Тема практического занятия | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -828,7 +828,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Основы нейросимволического ИИ | 1 | Сравнение архитектур нейросимволического ИИ по критериям интерпретируемости | 2 |  | ",
       "type": "table_row"
     },
@@ -837,7 +837,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Извлечение знаний | 2 | Анализ извлечённых правил нейросети: точность, полнота, человекочитаемость | 2 |  | ",
       "type": "table_row"
     },
@@ -846,7 +846,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Интеграция логики и нейросетей | 3 | Добавление логических ограничений в функцию потерь нейросети | 2 |  | ",
       "type": "table_row"
     },
@@ -855,7 +855,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Интеграция логики и нейросетей | 4 | Оценка влияния знаниевых ограничений на качество и интерпретируемость | 2 |  | ",
       "type": "table_row"
     },
@@ -864,7 +864,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Интерпретируемость | 5 | Аудит нейросимволической системы: поиск нарушений логических инвариантов | 2 |  | ",
       "type": "table_row"
     },
@@ -873,7 +873,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Интерпретируемость | 6 | Сравнение нейросимволических методов с классическими экспертными системами | 2 |  | ",
       "type": "table_row"
     },
@@ -882,7 +882,7 @@
       "title": "rpd_28.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- | ИТОГО: | 12 | 2 |  | ",
       "type": "table_row"
     },

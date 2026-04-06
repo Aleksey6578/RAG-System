@@ -715,7 +715,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ЛР | Название лабораторной работы | Трудоемкость, часы\nНомер раздела | № ЛР | Название лабораторной работы | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -724,7 +724,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Компьютерные сети и телекоммун | 1 | Анализ Ethernet-кадров и IP-пакетов в Wireshark\nЦель: изучить структуру кадров канального и сетевого уровней | 2 |  | ",
       "type": "table_row"
     },
@@ -733,7 +733,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Компьютерные сети и телекоммун | 2 | Настройка IP-адресации и маршрутизации в Cisco Packet Tracer\nЦель: освоить базовую конфигурацию маршрутизаторов | 2 |  | ",
       "type": "table_row"
     },
@@ -742,7 +742,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Компьютерные сети и телекоммун | 3 | Анализ TCP-сессии: захват и исследование handshake\nЦель: понять механизм установки и разрыва соединения TCP | 2 |  | ",
       "type": "table_row"
     },
@@ -751,7 +751,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Компьютерные сети и телекоммун | 4 | Настройка VLAN и STP в коммутируемой сети\nЦель: освоить технологии разделения сетей | 2 |  | ",
       "type": "table_row"
     },
@@ -760,7 +760,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Компьютерные сети и телекоммун | 5 | Настройка динамической маршрутизации OSPF\nЦель: реализовать отказоустойчивую маршрутизацию | 2 |  | ",
       "type": "table_row"
     },
@@ -769,7 +769,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Компьютерные сети и телекоммун | 6 | Разработка TCP-сервера и клиента на Python\nЦель: освоить программирование сетевых приложений | 2 |  | ",
       "type": "table_row"
     },
@@ -778,7 +778,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Компьютерные сети и телекоммун | 7 | Настройка брандмауэра iptables / Windows Firewall\nЦель: создать политики фильтрации трафика | 2 |  | ",
       "type": "table_row"
     },
@@ -787,7 +787,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Компьютерные сети и телекоммун | 8 | Настройка VPN-туннеля WireGuard между двумя узлами\nЦель: обеспечить зашифрованный канал связи | 2 |  | ",
       "type": "table_row"
     },
@@ -796,7 +796,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 16 |  | ",
       "type": "table_row"
     },
@@ -805,7 +805,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ПЗ | Тема практического занятия | Трудоемкость, часы\nНомер раздела | № ПЗ | Тема практического занятия | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -814,7 +814,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1 | 1 | Расчёт подсетей и составление плана IP-адресации | 4 |  | ",
       "type": "table_row"
     },
@@ -823,7 +823,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1 | 2 | Трассировка маршрута и диагностика сетевых проблем | 4 |  | ",
       "type": "table_row"
     },
@@ -832,7 +832,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2 | 3 | Сравнительный анализ протоколов маршрутизации | 4 |  | ",
       "type": "table_row"
     },
@@ -841,7 +841,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2 | 4 | Разработка HTTP-клиента с использованием библиотеки requests | 4 |  | ",
       "type": "table_row"
     },
@@ -850,7 +850,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3 | 5 | Проектирование корпоративной сети: топология и адресация | 4 |  | ",
       "type": "table_row"
     },
@@ -859,7 +859,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3 | 6 | Анализ атак на сеть по материалам CVE, методы противодействия | 4 |  | ",
       "type": "table_row"
     },
@@ -868,7 +868,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4 | 7 | Настройка мониторинга сети: SNMP и Zabbix | 4 |  | ",
       "type": "table_row"
     },
@@ -877,7 +877,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4 | 8 | Реализация WebSocket-сервера для чата | 4 |  | ",
       "type": "table_row"
     },
@@ -886,7 +886,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "5 | 9 | Исследование IoT-протоколов: MQTT брокер Mosquitto | 4 |  | ",
       "type": "table_row"
     },
@@ -895,7 +895,7 @@
       "title": "rpd_35.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 36 |  | ",
       "type": "table_row"
     },

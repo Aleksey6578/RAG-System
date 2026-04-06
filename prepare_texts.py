@@ -218,8 +218,13 @@ def process_file(path: str, out_file, seen: set,
 
 def main():
     seen: set = set()
-    # [З-P1] Множество уже встреченных document_id — для пропуска полных дублей.
-    seen_doc_ids: set = set()
+    # [З-P1] Два раздельных множества:
+    # seen_doc_ids — MD5(filename) для пропуска полных дублей по имени.
+    # seen_content_hashes — MD5(text) для пропуска файлов с идентичным содержимым.
+    # [БАГ-В ИСПРАВЛЕНО]: прежде оба значения помещались в один set → проверка
+    # `doc_id in seen_doc_ids` могла ложно срабатывать на content_hash другого файла.
+    seen_doc_ids: set        = set()
+    seen_content_hashes: set = set()
     total_written = total_dups = total_skipped_docs = 0
     table_count = 0
 
@@ -268,11 +273,11 @@ def main():
                         c.get("text", "") for c in _raw["chunks"]
                     )
                     content_hash = hashlib.md5(_chunks_texts.encode("utf-8")).hexdigest()
-                    if content_hash in seen_doc_ids:
+                    if content_hash in seen_content_hashes:
                         print(f"  ⏭  {fn}: пропущен (идентичное содержимое — контент-дубль)")
                         total_skipped_docs += 1
                         continue
-                    seen_doc_ids.add(content_hash)
+                    seen_content_hashes.add(content_hash)
 
                 if doc_id:
                     seen_doc_ids.add(doc_id)

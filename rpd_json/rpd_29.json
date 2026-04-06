@@ -747,7 +747,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ЛР | Название лабораторной работы | Трудоемкость, часы\nНомер раздела | № ЛР | Название лабораторной работы | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -756,7 +756,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Основы интеллектуального управления | 1 | Идентификация объекта управления нейронной сетью по данным эксперимента | 2 |  | ",
       "type": "table_row"
     },
@@ -765,7 +765,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Нейросетевое управление | 2 | Обучение нейронного ПИД-регулятора для управления тепловым объектом | 2 |  | ",
       "type": "table_row"
     },
@@ -774,7 +774,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Нечёткое управление | 3 | Синтез нечёткого регулятора для маятника на тележке в Simulink | 2 |  | ",
       "type": "table_row"
     },
@@ -783,7 +783,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Нечёткое управление | 4 | Адаптивный нейро-нечёткий регулятор на основе ANFIS для нелинейного объекта | 2 |  | ",
       "type": "table_row"
     },
@@ -792,7 +792,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-RL-управление | 5 | Обучение RL-агента управлению маятником с непрерывным пространством действий | 2 |  | ",
       "type": "table_row"
     },
@@ -801,7 +801,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-RL-управление | 6 | Сравнение нечёткого регулятора, нейросетевого и RL-управления по критериям качества | 2 |  | ",
       "type": "table_row"
     },
@@ -810,7 +810,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- | ИТОГО: | 12 | 2 |  | ",
       "type": "table_row"
     },
@@ -819,7 +819,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ПЗ | Тема практического занятия | Трудоемкость, часы\nНомер раздела | № ПЗ | Тема практического занятия | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -828,7 +828,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Основы интеллектуального управления | 1 | Анализ устойчивости нейросетевых систем управления по критерию Ляпунова | 2 |  | ",
       "type": "table_row"
     },
@@ -837,7 +837,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Нейросетевое управление | 2 | Сравнение архитектур нейронных идентификаторов для нелинейных объектов | 2 |  | ",
       "type": "table_row"
     },
@@ -846,7 +846,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Нечёткое управление | 3 | Настройка базы нечётких правил регулятора методом генетического алгоритма | 2 |  | ",
       "type": "table_row"
     },
@@ -855,7 +855,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Нечёткое управление | 4 | Исследование робастности нечёткого регулятора к параметрическим возмущениям | 2 |  | ",
       "type": "table_row"
     },
@@ -864,7 +864,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-RL-управление | 5 | Применение PPO и SAC к задаче управления квадрокоптером | 2 |  | ",
       "type": "table_row"
     },
@@ -873,7 +873,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-RL-управление | 6 | Оценка сходимости RL-алгоритмов на задачах управления в MuJoCo | 2 |  | ",
       "type": "table_row"
     },
@@ -882,7 +882,7 @@
       "title": "rpd_29.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- | ИТОГО: | 12 | 2 |  | ",
       "type": "table_row"
     },

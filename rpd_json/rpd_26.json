@@ -747,7 +747,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ЛР | Название лабораторной работы | Трудоемкость, часы\nНомер раздела | № ЛР | Название лабораторной работы | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -756,7 +756,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Решения в условиях неопределённости | 1 | Выбор оптимальной стратегии по критериям Вальда, Гурвица, Лапласа | 2 |  | ",
       "type": "table_row"
     },
@@ -765,7 +765,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Теория игр | 2 | Решение матричных игр и нахождение равновесия Нэша | 2 |  | ",
       "type": "table_row"
     },
@@ -774,7 +774,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Теория игр | 3 | Моделирование кооперативной игры и расчёт вектора Шэпли | 2 |  | ",
       "type": "table_row"
     },
@@ -783,7 +783,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Динамические задачи | 4 | Решение задачи о рюкзаке методом динамического программирования | 2 |  | ",
       "type": "table_row"
     },
@@ -792,7 +792,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Байесовские методы | 5 | Построение и вывод на байесовской сети решений в Python | 2 |  | ",
       "type": "table_row"
     },
@@ -801,7 +801,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Байесовские методы | 6 | Реализация алгоритма MCTS для принятия решений в игровых задачах | 2 |  | ",
       "type": "table_row"
     },
@@ -810,7 +810,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- | ИТОГО: | 12 | 2 |  | ",
       "type": "table_row"
     },
@@ -819,7 +819,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ПЗ | Тема практического занятия | Трудоемкость, часы\nНомер раздела | № ПЗ | Тема практического занятия | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -828,7 +828,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Решения в условиях неопределённости | 1 | Анализ чувствительности решений при изменении вероятностей состояний среды | 2 |  | ",
       "type": "table_row"
     },
@@ -837,7 +837,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Теория игр | 2 | Построение дерева игры и нахождение оптимальной стратегии | 2 |  | ",
       "type": "table_row"
     },
@@ -846,7 +846,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Теория игр | 3 | Анализ дилеммы заключённого и примеры равновесия Нэша в экономике | 2 |  | ",
       "type": "table_row"
     },
@@ -855,7 +855,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Динамические задачи | 4 | Применение метода ветвей и границ к задаче коммивояжёра | 2 |  | ",
       "type": "table_row"
     },
@@ -864,7 +864,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Байесовские методы | 5 | Байесовское обновление: апостериорные вероятности и принятие решений | 2 |  | ",
       "type": "table_row"
     },
@@ -873,7 +873,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Байесовские методы | 6 | Сравнение minimax, ожидаемой полезности и MCTS на игровых задачах | 2 |  | ",
       "type": "table_row"
     },
@@ -882,7 +882,7 @@
       "title": "rpd_26.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- | ИТОГО: | 12 | 2 |  | ",
       "type": "table_row"
     },

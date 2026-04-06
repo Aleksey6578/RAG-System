@@ -224,7 +224,7 @@ def text_hash(text: str, source: str = "", stype: str = "") -> str:
     (заменяется на «<SEM>»), что позволяет схлопывать идентичные книги
     из разных РПД в один чанк вместо создания 16 копий в Qdrant.
     """
-    SOURCELESS_TYPES = {"place", "hours", "bibliography"}
+    SOURCELESS_TYPES = {"place", "hours", "bibliography", "book_content"}
     effective_source = "" if stype in SOURCELESS_TYPES else source
 
     # [B-3] Для bibliography нормализуем поле семестра — убираем одиночные

@@ -758,7 +758,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ЛР | Название лабораторной работы | Трудоемкость, часы\nНомер раздела | № ЛР | Название лабораторной работы | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -767,7 +767,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Лингвистические основы | 1 | Построение конвейера предобработки русскоязычного текста с pymorphy2 | 2 |  | ",
       "type": "table_row"
     },
@@ -776,7 +776,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Лингвистические основы | 2 | Анализ частотности и построение облака слов корпуса новостей | 2 |  | ",
       "type": "table_row"
     },
@@ -785,7 +785,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Векторные представления | 3 | Обучение Word2Vec на корпусе и визуализация пространства векторов | 2 |  | ",
       "type": "table_row"
     },
@@ -794,7 +794,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Трансформеры и LLM | 4 | Fine-tuning BERT для классификации тональности отзывов | 2 |  | ",
       "type": "table_row"
     },
@@ -803,7 +803,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Прикладные задачи | 5 | Разработка NER-системы для извлечения именованных сущностей | 2 |  | ",
       "type": "table_row"
     },
@@ -812,7 +812,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Прикладные задачи | 6 | Построение вопрос-ответной системы на основе RAG-архитектуры | 2 |  | ",
       "type": "table_row"
     },
@@ -821,7 +821,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 12 |  | ",
       "type": "table_row"
     },
@@ -830,7 +830,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ПЗ | Тема практического занятия | Трудоемкость, часы\nНомер раздела | № ПЗ | Тема практического занятия | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -839,7 +839,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Лингвистические основы | 1 | Синтаксический разбор предложений с помощью spaCy и визуализация дерева зависимостей | 2 |  | ",
       "type": "table_row"
     },
@@ -848,7 +848,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Векторные представления | 2 | Измерение семантической близости документов методами косинусного сходства | 2 |  | ",
       "type": "table_row"
     },
@@ -857,7 +857,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Трансформеры и LLM | 3 | Применение zero-shot классификации с моделью ruBERT | 2 |  | ",
       "type": "table_row"
     },
@@ -866,7 +866,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Трансформеры и LLM | 4 | Генерация текста с управлением стилем через prompt engineering | 2 |  | ",
       "type": "table_row"
     },
@@ -875,7 +875,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Прикладные задачи | 5 | Оценка качества машинного перевода метриками BLEU и BERTScore | 2 |  | ",
       "type": "table_row"
     },
@@ -884,7 +884,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Прикладные задачи | 6 | Разработка чат-бота с памятью контекста на LangChain | 2 |  | ",
       "type": "table_row"
     },
@@ -893,7 +893,7 @@
       "title": "rpd_9.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 12 |  | ",
       "type": "table_row"
     },

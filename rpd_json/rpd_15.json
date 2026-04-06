@@ -758,7 +758,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ЛР | Название лабораторной работы | Трудоемкость, часы\nНомер раздела | № ЛР | Название лабораторной работы | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -767,7 +767,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Методы непрерывной оптимизации | 1 | Исследование сходимости Adam, SGD, RMSProp на задаче обучения нейросети | 2 |  | ",
       "type": "table_row"
     },
@@ -776,7 +776,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Методы непрерывной оптимизации | 2 | Реализация LR-scheduler и warm-up стратегий для оптимизации обучения | 2 |  | ",
       "type": "table_row"
     },
@@ -785,7 +785,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Оптимизация гиперпараметров | 3 | Автоматический подбор гиперпараметров модели с Optuna | 2 |  | ",
       "type": "table_row"
     },
@@ -794,7 +794,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Эволюционные методы | 4 | Решение задачи коммивояжёра генетическим алгоритмом | 2 |  | ",
       "type": "table_row"
     },
@@ -803,7 +803,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Эволюционные методы | 5 | Многокритериальная оптимизация архитектуры нейросети с NSGA-II | 2 |  | ",
       "type": "table_row"
     },
@@ -812,7 +812,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Обучение с подкреплением | 6 | Обучение агента игре CartPole и LunarLander с PPO в Gymnasium | 2 |  | ",
       "type": "table_row"
     },
@@ -821,7 +821,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 12 |  | ",
       "type": "table_row"
     },
@@ -830,7 +830,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ПЗ | Тема практического занятия | Трудоемкость, часы\nНомер раздела | № ПЗ | Тема практического занятия | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -839,7 +839,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Методы непрерывной оптимизации | 1 | Визуализация потерь и градиентов в TensorBoard при разных оптимизаторах | 2 |  | ",
       "type": "table_row"
     },
@@ -848,7 +848,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Оптимизация гиперпараметров | 2 | Сравнение Bayesian Optimization и Random Search по числу вызовов функции | 2 |  | ",
       "type": "table_row"
     },
@@ -857,7 +857,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Оптимизация гиперпараметров | 3 | Применение AutoML-системы AutoSklearn для задачи табличной классификации | 2 |  | ",
       "type": "table_row"
     },
@@ -866,7 +866,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Эволюционные методы | 4 | Оптимизация топологии нейросети с помощью NEAT-алгоритма | 2 |  | ",
       "type": "table_row"
     },
@@ -875,7 +875,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Обучение с подкреплением | 5 | Обучение RL-агента для задачи управления инвертированным маятником | 2 |  | ",
       "type": "table_row"
     },
@@ -884,7 +884,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Обучение с подкреплением | 6 | Transfer learning RL-агента из простой среды в сложную (curriculum learning) | 2 |  | ",
       "type": "table_row"
     },
@@ -893,7 +893,7 @@
       "title": "rpd_15.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 12 |  | ",
       "type": "table_row"
     },

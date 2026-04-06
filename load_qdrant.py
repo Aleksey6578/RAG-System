@@ -219,8 +219,12 @@ def upsert_batch_with_retry(ids: list, vectors: list, payloads: list) -> bool:
             time.sleep(delay)
             delay *= 2
 
+    # [БАГ-Б ИСПРАВЛЕНО]: функция возвращала None вместо False после исчерпания
+    # всех попыток — implicit falsy, но нарушает сигнатуру -> bool.
     print(f"  ❌ {len(ids)} точек не загружены после {RETRY_COUNT} попыток")
     return False
+
+
 
 
 # ---------------------------------------------------------------------------

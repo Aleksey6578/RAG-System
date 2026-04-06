@@ -758,7 +758,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ЛР | Название лабораторной работы | Трудоемкость, часы\nНомер раздела | № ЛР | Название лабораторной работы | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -767,7 +767,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Классическая обработка | 1 | Реализация фильтрации и морфологических операций с OpenCV | 2 |  | ",
       "type": "table_row"
     },
@@ -776,7 +776,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Классическая обработка | 2 | Детекция и распознавание контуров на промышленных изображениях | 2 |  | ",
       "type": "table_row"
     },
@@ -785,7 +785,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Глубокое обучение | 3 | Обучение классификатора изображений на датасете CIFAR-100 | 2 |  | ",
       "type": "table_row"
     },
@@ -794,7 +794,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Детекция и сегментация | 4 | Обучение YOLOv8 для детекции объектов на собственном датасете | 2 |  | ",
       "type": "table_row"
     },
@@ -803,7 +803,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Детекция и сегментация | 5 | Семантическая сегментация сцен с U-Net на датасете CamVid | 2 |  | ",
       "type": "table_row"
     },
@@ -812,7 +812,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Развертывание CV-систем | 6 | Конвертация модели в ONNX и оценка скорости вывода | 2 |  | ",
       "type": "table_row"
     },
@@ -821,7 +821,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 12 |  | ",
       "type": "table_row"
     },
@@ -830,7 +830,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ПЗ | Тема практического занятия | Трудоемкость, часы\nНомер раздела | № ПЗ | Тема практического занятия | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -839,7 +839,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Классическая обработка | 1 | Построение пайплайна предобработки изображений для промышленного контроля качества | 2 |  | ",
       "type": "table_row"
     },
@@ -848,7 +848,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Глубокое обучение | 2 | Применение Grad-CAM для визуализации признаков CNN | 2 |  | ",
       "type": "table_row"
     },
@@ -857,7 +857,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Глубокое обучение | 3 | Разметка собственного датасета в Label Studio и обучение классификатора | 2 |  | ",
       "type": "table_row"
     },
@@ -866,7 +866,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Детекция и сегментация | 4 | Оценка детектора по метрикам mAP@50 и mAP@50:95 | 2 |  | ",
       "type": "table_row"
     },
@@ -875,7 +875,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Развертывание CV-систем | 5 | Профилирование задержки вывода модели на CPU и GPU | 2 |  | ",
       "type": "table_row"
     },
@@ -884,7 +884,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Развертывание CV-систем | 6 | Развёртывание CV-сервиса через FastAPI с обработкой видеопотока | 2 |  | ",
       "type": "table_row"
     },
@@ -893,7 +893,7 @@
       "title": "rpd_4.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 12 |  | ",
       "type": "table_row"
     },

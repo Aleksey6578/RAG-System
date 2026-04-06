@@ -715,7 +715,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ЛР | Название лабораторной работы | Трудоемкость, часы\nНомер раздела | № ЛР | Название лабораторной работы | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -724,7 +724,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Технологии больших данных | 1 | Установка Hadoop в псевдораспределённом режиме, работа с HDFS\nЦель: освоить базовые операции HDFS | 2 |  | ",
       "type": "table_row"
     },
@@ -733,7 +733,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Технологии больших данных | 2 | Написание и запуск MapReduce задачи подсчёта слов\nЦель: реализовать парадигму MapReduce на практике | 2 |  | ",
       "type": "table_row"
     },
@@ -742,7 +742,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Технологии больших данных | 3 | Первые шаги с PySpark: RDD и DataFrame операции\nЦель: освоить основной API Apache Spark | 2 |  | ",
       "type": "table_row"
     },
@@ -751,7 +751,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Технологии больших данных | 4 | Анализ датасета с помощью Spark SQL и Hive\nЦель: использовать SQL-интерфейс к распределённым данным | 2 |  | ",
       "type": "table_row"
     },
@@ -760,7 +760,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Технологии больших данных | 5 | Настройка Apache Kafka: создание топиков, producer/consumer\nЦель: освоить событийную потоковую шину | 2 |  | ",
       "type": "table_row"
     },
@@ -769,7 +769,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Технологии больших данных | 6 | Spark Structured Streaming: обработка потока из Kafka\nЦель: реализовать pipeline реального времени | 2 |  | ",
       "type": "table_row"
     },
@@ -778,7 +778,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Технологии больших данных | 7 | Работа с MongoDB: CRUD, агрегация, индексы\nЦель: освоить документо-ориентированное хранилище | 2 |  | ",
       "type": "table_row"
     },
@@ -787,7 +787,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Технологии больших данных | 8 | MLlib: кластеризация K-Means на большом датасете\nЦель: применить ML на распределённых данных | 2 |  | ",
       "type": "table_row"
     },
@@ -796,7 +796,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 16 |  | ",
       "type": "table_row"
     },
@@ -805,7 +805,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ПЗ | Тема практического занятия | Трудоемкость, часы\nНомер раздела | № ПЗ | Тема практического занятия | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -814,7 +814,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1 | 1 | Обзор экосистемы Hadoop: компоненты и их роли | 4 |  | ",
       "type": "table_row"
     },
@@ -823,7 +823,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1 | 2 | Сравнение реляционных и NoSQL баз данных для Big Data | 4 |  | ",
       "type": "table_row"
     },
@@ -832,7 +832,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2 | 3 | Оптимизация Spark-задач: persist, broadcast, partitioning | 4 |  | ",
       "type": "table_row"
     },
@@ -841,7 +841,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2 | 4 | Проектирование Data Lake для корпоративных данных | 4 |  | ",
       "type": "table_row"
     },
@@ -850,7 +850,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3 | 5 | Lambda и Kappa архитектуры: сравнение и применение | 4 |  | ",
       "type": "table_row"
     },
@@ -859,7 +859,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3 | 6 | Мониторинг Spark-приложений через Spark UI | 4 |  | ",
       "type": "table_row"
     },
@@ -868,7 +868,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4 | 7 | Построение ETL-пайплайна: источник → трансформация → хранилище | 4 |  | ",
       "type": "table_row"
     },
@@ -877,7 +877,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4 | 8 | Визуализация результатов анализа Big Data в Apache Superset | 4 |  | ",
       "type": "table_row"
     },
@@ -886,7 +886,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "5 | 9 | Разбор кейсов: Big Data в промышленности и ритейле | 4 |  | ",
       "type": "table_row"
     },
@@ -895,7 +895,7 @@
       "title": "rpd_36.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 36 |  | ",
       "type": "table_row"
     },

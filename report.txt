@@ -2,13 +2,21 @@ cd desktop
 cd project
 venv\Scripts\activate
 docker run -p 6333:6333 -p 6334:6334 --name qdrant -d qdrant/qdrant:latest
-python converter.py 
+python converter.py
 python prepare_texts.py
 python chunking.py
 python load_qdrant.py
+python book_loader.py       
 python rpd_generate.py config.json
 python evaluate.py
+python test_generate.py
 
+
+# Быстрый режим (использует уже готовый data_clean.jsonl)
+python analyze_corpus.py --jsonl data_clean.jsonl
+
+# Полный режим (читает .docx напрямую, точнее)
+python analyze_corpus.py --corpus-dir rpd_corpus
 
 
 После изменения проекта открываем Терминал

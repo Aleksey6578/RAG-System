@@ -715,7 +715,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ЛР | Название лабораторной работы | Трудоемкость, часы\nНомер раздела | № ЛР | Название лабораторной работы | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -724,7 +724,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Программирование на Python для | 1 | Решение алгоритмических задач на Python: сортировки, поиск\nЦель: закрепить базовый синтаксис и алгоритмическое мышление | 2 |  | ",
       "type": "table_row"
     },
@@ -733,7 +733,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1-Программирование на Python для | 2 | ООП: разработка иерархии классов для инженерного расчёта\nЦель: освоить ООП-паттерны в контексте технических задач | 2 |  | ",
       "type": "table_row"
     },
@@ -742,7 +742,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Программирование на Python для | 3 | Матричные вычисления с NumPy: метод наименьших квадратов\nЦель: решить задачу регрессии средствами линейной алгебры | 2 |  | ",
       "type": "table_row"
     },
@@ -751,7 +751,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2-Программирование на Python для | 4 | Численное интегрирование и решение ОДУ с scipy.integrate\nЦель: применить численные методы к физическим задачам | 2 |  | ",
       "type": "table_row"
     },
@@ -760,7 +760,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Программирование на Python для | 5 | Обработка и очистка данных в Pandas: пропуски, выбросы\nЦель: подготовить датасет для анализа | 2 |  | ",
       "type": "table_row"
     },
@@ -769,7 +769,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3-Программирование на Python для | 6 | Исследовательский анализ данных с Seaborn и Matplotlib\nЦель: визуализировать и интерпретировать инженерные данные | 2 |  | ",
       "type": "table_row"
     },
@@ -778,7 +778,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Программирование на Python для | 7 | Автоматизация обработки Excel-отчётов с openpyxl/pandas\nЦель: создать скрипт формирования отчёта | 2 |  | ",
       "type": "table_row"
     },
@@ -787,7 +787,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4-Программирование на Python для | 8 | Разработка REST-клиента и парсинг данных из API\nЦель: освоить интеграцию с внешними источниками данных | 2 |  | ",
       "type": "table_row"
     },
@@ -796,7 +796,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень лабораторных работ",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 16 |  | ",
       "type": "table_row"
     },
@@ -805,7 +805,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "Номер раздела | № ПЗ | Тема практического занятия | Трудоемкость, часы\nНомер раздела | № ПЗ | Тема практического занятия | очная | очно-заочная | заочная",
       "type": "table_row"
     },
@@ -814,7 +814,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1 | 1 | Разбор идиоматического Python: list comprehension, zip, map, filter | 4 |  | ",
       "type": "table_row"
     },
@@ -823,7 +823,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "1 | 2 | Отладка Python-программ в VS Code: точки останова, профилирование | 4 |  | ",
       "type": "table_row"
     },
@@ -832,7 +832,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2 | 3 | Оптимизация вычислений: Numba JIT, Cython vs чистый Python | 4 |  | ",
       "type": "table_row"
     },
@@ -841,7 +841,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "2 | 4 | Решение оптимизационных задач: scipy.optimize | 4 |  | ",
       "type": "table_row"
     },
@@ -850,7 +850,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3 | 5 | Построение интерактивных дашбордов в Plotly Dash | 4 |  | ",
       "type": "table_row"
     },
@@ -859,7 +859,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "3 | 6 | Геопространственные данные: geopandas, folium | 4 |  | ",
       "type": "table_row"
     },
@@ -868,7 +868,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4 | 7 | Многопоточность и асинхронность: threading, asyncio | 4 |  | ",
       "type": "table_row"
     },
@@ -877,7 +877,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "4 | 8 | Написание unit-тестов и настройка CI/CD в GitHub Actions | 4 |  | ",
       "type": "table_row"
     },
@@ -886,7 +886,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "5 | 9 | Разбор кейсов применения Python в промышленности и ИТ | 4 |  | ",
       "type": "table_row"
     },
@@ -895,7 +895,7 @@
       "title": "rpd_38.docx",
       "section_title": "Перечень практических занятий",
       "section_level": 2,
-      "section_type": "assessment",
+      "section_type": "content",
       "text": "- |  | ИТОГО: | 36 |  | ",
       "type": "table_row"
     },
