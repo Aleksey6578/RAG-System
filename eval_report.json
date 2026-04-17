@@ -1,54 +1,54 @@
 {
   "discipline": "Интеллектуальные системы",
   "generated_docx": "output_rpd.docx",
-  "reference_source": "rpd_29.json",
-  "reference_title": "Интеллектуальные системы управления",
+  "reference_source": "rpd_28.json",
+  "reference_title": "Извлечение знаний из нейронных сетей",
   "reference_mode": "docx",
-  "embedding_similarity": 0.9584,
+  "embedding_similarity": 0.7259,
   "section_references": {},
   "metrics": {
     "competencies": {
-      "bleu": 0.1368,
+      "bleu": 0.1325,
       "rouge1": 0.7778,
       "rouge2": 0.375,
       "rougeL": 0.6667
     },
     "outcomes": {
-      "bleu": 0.1491,
-      "rouge1": 0.6029,
-      "rouge2": 0.4776,
-      "rougeL": 0.5735
+      "bleu": 0.1517,
+      "rouge1": 0.5493,
+      "rouge2": 0.4571,
+      "rougeL": 0.5493
     },
     "content": {
-      "bleu": 0.2961,
-      "rouge1": 0.5414,
-      "rouge2": 0.3206,
-      "rougeL": 0.406
+      "bleu": 0.2304,
+      "rouge1": 0.5143,
+      "rouge2": 0.2899,
+      "rougeL": 0.3857
     },
     "lab_works": {
-      "bleu": 0.176,
-      "rouge1": 0.4889,
-      "rouge2": 0.2791,
-      "rougeL": 0.4444
+      "bleu": 0.1734,
+      "rouge1": 0.4681,
+      "rouge2": 0.2222,
+      "rougeL": 0.4255
     },
     "practice": {
-      "bleu": 0.1823,
-      "rouge1": 0.4889,
-      "rouge2": 0.186,
-      "rougeL": 0.4
+      "bleu": 0.1439,
+      "rouge1": 0.5366,
+      "rouge2": 0.2564,
+      "rougeL": 0.439
     },
     "bibliography": {
-      "bleu": 0.6042,
-      "rouge1": 0.7949,
-      "rouge2": 0.6579,
-      "rougeL": 0.7949
+      "bleu": 0.4376,
+      "rouge1": 0.5195,
+      "rouge2": 0.32,
+      "rougeL": 0.5195
     },
     "overall": {
-      "bleu": 0.3449,
-      "rouge1": 0.6898,
-      "rouge2": 0.5678,
-      "rougeL": 0.5833
+      "bleu": 0.3574,
+      "rouge1": 0.6368,
+      "rouge2": 0.5079,
+      "rougeL": 0.5331
     }
   },
-  "timestamp": "2026-04-06T10:51:23"
+  "timestamp": "2026-04-17T21:42:36"
 }

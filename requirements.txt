@@ -7,3 +7,6 @@ torch
 accelerate
 numpy
 requests
+openai
+python-docx
+PyMuPDF

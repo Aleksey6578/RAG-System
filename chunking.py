@@ -58,52 +58,69 @@ import hashlib
 import os
 import re
 from collections import Counter
+# [§3.2.1] classify_section вынесена в utils.py — единая реализация для
+# converter.py и chunking.py устраняет риск рассинхронизации при правке ключевых слов.
+from utils import classify_section
 
 INPUT_FILE  = "data_clean.jsonl"
 OUTPUT_FILE = "chunks.jsonl"
 
 # ---------------------------------------------------------------------------
-# [K] Токенизатор — tiktoken с graceful fallback
+# [K] Токенизатор — AutoTokenizer bge-m3 с fallback на tiktoken / слова
 # ---------------------------------------------------------------------------
+# [6.2.4] ИСПРАВЛЕНО: заменён tiktoken cl100k_base на AutoTokenizer('BAAI/bge-m3').
+# Причина: tiktoken использует словарь GPT-4, расхождение с bge-m3 для русского
+# текста составляет 10–25%. AutoTokenizer даёт точный подсчёт для модели эмбеддинга.
+# Цепочка fallback: bge-m3 → tiktoken cl100k_base → слова×1.5.
 
 try:
-    import tiktoken
-    _enc = tiktoken.get_encoding("cl100k_base")
+    from transformers import AutoTokenizer as _AutoTokenizer
+    _bge_tok = _AutoTokenizer.from_pretrained("BAAI/bge-m3")
 
     def count_tokens(text: str) -> int:
-        return len(_enc.encode(text))
+        return len(_bge_tok.encode(text, add_special_tokens=False))
 
-    # [З-4] tiktoken cl100k_base — это словарь GPT-4, НЕ bge-m3.
-    # bge-m3 использует собственный мультиязычный BPE (BAAI/bge-m3).
-    # Для русского текста расхождение ~10–25%: один фрагмент может получить
-    # разные значения token_count здесь и при реальной токенизации bge-m3.
-    # Это приемлемо как аппроксимация: при MAX_TOKENS=400 и среднем чанке
-    # ~134 токена запас достаточен, чтобы ни один чанк не превысил лимит
-    # bge-m3 (8192 токена). Точный подсчёт: AutoTokenizer("BAAI/bge-m3").
-    _COUNT_MODE  = "токены (tiktoken cl100k_base, аппроксимация для bge-m3)"
+    _COUNT_MODE  = "токены (AutoTokenizer BAAI/bge-m3, точный)"
     MAX_TOKENS   = 400
     OVERLAP_TOKENS = 60
     MIN_TOKENS   = 40
 
-except ImportError:
-    _WORD_TO_TOKEN = 1.5
+except Exception:
+    try:
+        import tiktoken
+        _enc = tiktoken.get_encoding("cl100k_base")
 
-    def count_tokens(text: str) -> int:
-        return int(len(text.split()) * _WORD_TO_TOKEN)
+        def count_tokens(text: str) -> int:
+            return len(_enc.encode(text))
 
-    _COUNT_MODE  = f"слова×{_WORD_TO_TOKEN} (tiktoken не установлен)"
-    MAX_TOKENS   = 450
-    OVERLAP_TOKENS = 75
-    MIN_TOKENS   = 45
+        _COUNT_MODE  = "токены (tiktoken cl100k_base, аппроксимация для bge-m3)"
+        MAX_TOKENS   = 400
+        OVERLAP_TOKENS = 60
+        MIN_TOKENS   = 40
 
-MAX_WORDS = MAX_TOKENS
-OVERLAP   = OVERLAP_TOKENS
-MIN_WORDS = MIN_TOKENS
+    except ImportError:
+        _WORD_TO_TOKEN = 1.5
 
-# [З-3] Повышен с 25→50 ранее; [З-K3] ИСПРАВЛЕНО: поднят до 100 — при 16 документах
-# в корпусе лимит 50 срабатывал на каждом файле для типа 'assessment' (35–49 чанков
-# после group_short_chunks), отсекая строки ФОС и ПЗ. Переопределяется ключом
-# max_chunks_per_section_type в config.json.
+        def count_tokens(text: str) -> int:
+            return int(len(text.split()) * _WORD_TO_TOKEN)
+
+        _COUNT_MODE  = f"слова×{_WORD_TO_TOKEN} (tiktoken и transformers не установлены)"
+        MAX_TOKENS   = 450
+        OVERLAP_TOKENS = 75
+        MIN_TOKENS   = 45
+
+# [5] ИСПРАВЛЕНО: удалены алиасы MAX_WORDS / OVERLAP / MIN_WORDS.
+# Это были зеркальные константы для MAX_TOKENS / OVERLAP_TOKENS / MIN_TOKENS,
+# объявленные в обоих ветках try/except, но нигде в коде не использовавшиеся
+# напрямую (весь код обращается к *_TOKENS). Их присутствие создавало путаницу
+# при чтении и риск рассинхронизации при изменении порогов.
+
+# [FIX-#11] Повышен с 25→50 ранее; [З-K3] поднят до 100.
+# АУДИТ #11: assessment занимает 43% коллекции (1470 чанков) — ФОС-бойлерплейт.
+# Решение без изменения кода: добавить в config.json:
+#   "max_chunks_per_type": {"assessment": 10}
+# Это снизит долю assessment до ~15% без затрагивания content/learning_outcomes.
+# Код ниже уже поддерживает этот override через ключ max_chunks_per_type.
 MAX_CHUNKS_PER_SECTION_TYPE = 100
 
 # [FIX-TITLE] Лимит «заголовочных» чанков для типа assessment на пару (source, type).
@@ -127,31 +144,6 @@ NOISE_TITLES = {
 # Удаление из NOISE_TITLES позволяет чанкам с section_type="bibliography" пройти
 # в chunks.jsonl и далее в Qdrant.
 NOISE_TITLES_LOWER = {t.lower() for t in NOISE_TITLES}
-
-
-def classify_section(title: str) -> str:
-    if not title:
-        return "other"
-    t = title.lower()
-    if re.search(r"цел[ьи]|задач[аи]", t):                                     return "goals"
-    if re.search(r"компетенц", t):                                               return "competencies"
-    if re.search(r"доступн|инвалид|огранич.{0,15}возможн|здоровь|овз", t):     return "accessibility"
-    if re.search(r"результат.{0,10}обучен|индикатор", t):                       return "learning_outcomes"
-    if re.search(r"содержан|лекц|лаборатор|практич|тем[аы]", t):               return "content"
-    # [FIX-1б] "самостоятельн" убрано из assessment: заголовки вида
-    # «Самостоятельная работа студента» некорректно попадали в assessment
-    # вместо content/hours. Теперь assessment ловит только явные ФОС-заголовки.
-    if re.search(r"фос|фонд оценочн|оценочн|аттестац|контрол|виды\s+сро", t): return "assessment"
-    # [З-C1] ИСПРАВЛЕНО: добавлены ключевые слова для заголовка «СВЕДЕНИЯ об
-    # обеспеченности дисциплины учебной литературой» — синхронизировано с
-    # SECTION_TYPE_MAP в converter.py.
-    if re.search(r"литература|библиограф|учебно.метод|учебной литератур|обеспеченност|^сведени", t):
-        return "bibliography"
-    if re.search(r"методическ", t):                                             return "methodical"
-    if re.search(r"место.{0,15}дисципл|структур.{0,10}опоп", t):               return "place"
-    if re.search(r"матери.{0,10}техн|аудитор|оборудован", t):                  return "infrastructure"
-    if re.search(r"час[ыа]|трудоёмк|трудоем|семестр", t):                      return "hours"
-    return "other"
 
 
 def build_metadata(text: str, section_title: str, source: str,
@@ -403,7 +395,7 @@ def group_short_chunks(records: list, max_group_tokens: int = 200) -> list:
         stype  = r.get("section_type")
         source = r.get("source") or ""   # [З-K2] пустой source не вызывает смешение
         tc = count_tokens(r["text"])
-        if stype in GROUPABLE and tc < 90 and source:
+        if stype in GROUPABLE and tc < 200 and source:
             group_text = r["text"]
             group_tc   = tc
             j = i + 1
@@ -444,7 +436,14 @@ def main():
     chunks_limit = MAX_CHUNKS_PER_SECTION_TYPE
     # [FIX-1а] Раздельные лимиты по типам через ключ "max_chunks_per_type".
     # Позволяет снизить assessment до 20 не затрагивая content/learning_outcomes.
-    type_limits: dict = {}
+    # [FIX-LIMITS] ИСПРАВЛЕНО (отчёт §3.2): дефолтные лимиты assessment=20,
+    # accessibility=10 вместо прежних 12 и 5. Жёсткие лимиты обрезали корпус
+    # ДО этапа retrieval, теряя ~500 чанков. Новые дефолты применяются если
+    # config.json не задаёт "max_chunks_per_type" явно.
+    type_limits: dict = {
+        "assessment":    20,   # было 12 → теряло ~660 блоков
+        "accessibility": 10,   # было 5 → теряло ~310 блоков
+    }
     if os.path.exists("config.json"):
         try:
             with open("config.json", encoding="utf-8") as _cf:
@@ -455,7 +454,8 @@ def main():
                 print(f"config.json: max_chunks_per_section_type={chunks_limit} (переопределено)")
             _tl = _cfg.get("max_chunks_per_type")
             if _tl and isinstance(_tl, dict):
-                type_limits = {k: int(v) for k, v in _tl.items()}
+                # [FIX-LIMITS] Merge: config.json переопределяет дефолты, но не стирает их
+                type_limits.update({k: int(v) for k, v in _tl.items()})
                 print(f"config.json: max_chunks_per_type={type_limits} (переопределено)")
         except Exception as _e:
             print(f"  ⚠️  config.json не прочитан для chunking: {_e}")

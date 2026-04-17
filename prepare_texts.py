@@ -41,7 +41,49 @@ OUTPUT_FILE = "data_clean.jsonl"
 # Позволяет проставить доменные поля для фильтрации в Qdrant / rpd_generate.
 CORPUS_META_FILE = os.path.join(DATA_DIR, "corpus_meta.json")
 
-MIN_WORDS = 10
+# [FIX-#17] MIN_WORDS поднят с 10 до 21 (рекомендация аудита: 20–22).
+# При MIN_WORDS=10 короткие строки вида «Зачётная единица: 4» (~4 слова)
+# после округления count_tokens(*1.8) давали tc≈7 и проходили в corpus.
+# Порог 21 слово ≈ ~38 токенов — соответствует MIN_TOKENS=40 в chunking.py
+# и отсекает ~5–10% бессодержательных коротких записей.
+MIN_WORDS = 21
+
+# [§15.4.1] Паттерн для извлечения названия дисциплины из текста первых чанков.
+# Ищет строку «РАБОЧАЯ ПРОГРАММА ДИСЦИПЛИНЫ» и берёт следующую непустую строку.
+_RPD_TITLE_RE = re.compile(
+    r"РАБОЧАЯ\s+ПРОГРАММА\s+ДИСЦИПЛИНЫ[^\n]*\n+([^\n]{5,120})",
+    re.IGNORECASE,
+)
+
+
+def extract_discipline_title(records: list) -> str:
+    """[§15.4.1] Ищет название дисциплины в тексте первых 10 чанков документа."""
+    for rec in records[:10]:
+        text = rec.get("text", "")
+        m = _RPD_TITLE_RE.search(text)
+        if m:
+            return m.group(1).strip()
+    return ""
+
+
+def _normalize_title_field(title: str) -> str:
+    """
+    [FIX-TITLE-NORM] Нормализация title — удаление табличного мусора (отчёт §2.4).
+    
+    Заголовки в корпусе содержат табличный мусор:
+    «2 | Извлечение знаний из нейронных сетей | 7 | 3 | 9 | 4 | 1».
+    Это приводит к ненадёжному title-поиску (score 0.478) в evaluate.
+    """
+    if not title:
+        return title
+    if " | " in title:
+        parts = [p.strip() for p in title.split("|")]
+        text_parts = [p for p in parts if p and not re.match(r"^\d+$", p) and len(p) > 3]
+        if text_parts:
+            title = max(text_parts, key=len)
+    title = re.sub(r"^\d+\s+", "", title.strip())
+    title = re.sub(r"\s+\d+$", "", title.strip())
+    return title.strip() or None
 
 
 def normalize_list_markers(text: str) -> str:
@@ -105,8 +147,9 @@ def load_corpus_meta() -> dict:
 
 def process_record(
     record: dict, out_file, source: str, seen: set,
-    document_meta: dict = None,  # [V] document-level metadata из нового формата
-    domain_meta: dict = None,    # [X] direction/level/department из corpus_meta.json
+    document_meta: dict = None,   # [V] document-level metadata из нового формата
+    domain_meta: dict = None,     # [X] direction/level/department из corpus_meta.json
+    discipline_title: str = "",   # [§15.4.1] fallback название дисциплины
 ) -> Tuple[bool, bool]:
     """
     Возвращает (записан, пропущен_как_дубль).
@@ -133,23 +176,22 @@ def process_record(
 
     record_type = record.get("type", "text")
 
-    # [W] Оценка token_count: для русского текста реальное значение ~1.7–1.9 т/слово.
-    # [П10] Коэффициент повышен с 1.5 → 1.8 для честности статистики в data_clean.jsonl.
-    # Точное значение всё равно пересчитывается в chunking.py через tiktoken,
-    # здесь только быстрая оценка для downstream-фильтрации.
-    token_count_est = round(word_count * 1.8)
+    # [W] token_count_est убран из записи ([FIX-#12]): chunking.py пересчитывает
+    # через tiktoken и не читает это поле. Оставлен только в print-статистике ниже.
+    token_count_est = round(word_count * 1.8)  # только для print
 
     output_record = {
         "source":           source,
         "document_id":      record.get("document_id", ""),
-        "title":            record.get("title"),
+        # [FIX-TITLE-NORM] Нормализация title — удаление табличного мусора (отчёт §2.4).
+        "title":            _normalize_title_field(record.get("title") or discipline_title or ""),
         "section_title":    record.get("section_title"),
         "section_level":    record.get("section_level", 0),   # [6] уже int из converter v3.2
         "section_type":     record.get("section_type"),
         "type":             record_type,
         "text":             cleaned,
         "word_count":       word_count,
-        "token_count_est":  token_count_est,   # [W]
+        # token_count_est убран — [FIX-#12]
     }
 
     # [V] Document-level metadata из нового формата converter
@@ -202,11 +244,15 @@ def process_file(path: str, out_file, seen: set,
         records       = data if isinstance(data, list) else [data]
         document_meta = None
 
+    # [§15.4.1] Извлечь название дисциплины из текста — fallback для пустых title
+    discipline_title = extract_discipline_title(records)
+
     for r in records:
         ok, dup = process_record(
             r, out_file, source, seen,
             document_meta=document_meta,
-            domain_meta=domain_meta,      # [X]
+            domain_meta=domain_meta,         # [X]
+            discipline_title=discipline_title,  # [§15.4.1]
         )
         if ok:
             written += 1
@@ -305,12 +351,7 @@ def main():
     print(f"  Таблиц с table_data: {table_count}")
     print(f"  Уникальность: {total_written / max(total_written + total_dups, 1) * 100:.1f}%")
 
-    # [W] Статистика token_count_est
-    with open(OUTPUT_FILE, encoding="utf-8") as f:
-        all_toks = [json.loads(l).get("token_count_est", 0) for l in f]
-    if all_toks:
-        print(f"  token_count_est: min={min(all_toks)}, "
-              f"max={max(all_toks)}, avg={sum(all_toks)//len(all_toks)}")
+    # [FIX-#12] Блок статистики token_count_est удалён — поле убрано из записей.
 
     # [X] Статистика доменных полей
     with open(OUTPUT_FILE, encoding="utf-8") as f:

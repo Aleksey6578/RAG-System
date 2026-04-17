@@ -11,11 +11,27 @@ python rpd_generate.py config.json
 python evaluate.py
 python test_generate.py
 
+----
+RouterAi
+----
+cd desktop
+cd project
+venv\Scripts\activate
+docker run -p 6333:6333 -p 6334:6334 --name qdrant -d qdrant/qdrant:latest
+python converter.py
+python prepare_texts.py
+python chunking.py
+python load_qdrant_routerai.py
+python book_loader_routerai.py       
+python rpd_generate_routerai.py config.json
+python evaluate_routerai.py
+python test_generate_routerai.py
+----
 
-# Быстрый режим (использует уже готовый data_clean.jsonl)
-python analyze_corpus.py --jsonl data_clean.jsonl
+# рядом должен быть corpus_meta.json для настройки domains РПД абзацев
+py reclassify_domains.py
 
-# Полный режим (читает .docx напрямую, точнее)
+# Текущий корпус с реальным порогом для RAG:
 python analyze_corpus.py --corpus-dir rpd_corpus
 
 

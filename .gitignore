@@ -5,3 +5,17 @@ __pycache__/
 .idea/
 .vscode/
 .DS_Store
+rpd_corpus/
+rpd_books/
+rpd_json/
+chunks.jsonl
+data_clean.jsonl
+*_cache.json
+*_log.json
+eval_*.json
+corpus_analysis.json
+coverage_report.json
+report.txt
+output_*.docx
+*.dotx
+Test/

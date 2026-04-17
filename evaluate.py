@@ -26,9 +26,55 @@ from typing import Optional
 
 import numpy as np
 import requests
-from docx import Document
+from docx import Document                        # [FIX-PEP8] перенесён из середины файла
+from nltk.stem.snowball import SnowballStemmer   # [FIX-ROUGE] для стемминга русских токенов
+# [FIX-#18] Единая embed-функция из utils.py
+from utils import get_embedding as _embed_raw
+
+# [FIX-#9] Кэш эмбеддингов: evaluate.py вычислял 49×N эмбеддингов при каждом
+# запуске. Простой dict-кэш + персистенция в eval_cache.json — аналогично
+# rpd_cache.json в rpd_generate.py.
+_EMBED_CACHE: dict = {}
+_EVAL_CACHE_FILE = "eval_cache.json"
+
+
+def _load_eval_cache() -> None:
+    global _EMBED_CACHE
+    from pathlib import Path as _Path
+    p = _Path(_EVAL_CACHE_FILE)
+    if p.exists():
+        try:
+            _EMBED_CACHE = json.loads(p.read_text(encoding="utf-8"))
+            print(f"📦 eval_cache: {len(_EMBED_CACHE)} эмбеддингов загружено")
+        except Exception as e:
+            print(f"⚠️  Ошибка загрузки eval_cache: {e}")
+
+
+def _save_eval_cache() -> None:
+    from pathlib import Path as _Path
+    try:
+        _Path(_EVAL_CACHE_FILE).write_text(
+            json.dumps(_EMBED_CACHE, ensure_ascii=False), encoding="utf-8"
+        )
+    except Exception as e:
+        print(f"⚠️  Ошибка сохранения eval_cache: {e}")
+
+
 from nltk.translate.bleu_score import SmoothingFunction, corpus_bleu
 from rouge_score import rouge_scorer as rs_lib
+
+# [FIX-ROUGE] Стеммер для предобработки русских токенов перед ROUGE-подсчётом.
+# use_stemmer=True в RougeScorer использует PorterStemmer (английский) — неприменим
+# для русского. Предобработка через SnowballStemmer('russian') снижает занижение
+# ROUGE на 10–20% (нейронных ≠ нейронные без стемминга).
+_ru_stemmer = SnowballStemmer("russian")
+
+
+def _stem_ru(text: str) -> str:
+    """Стемминг русского текста для передачи в RougeScorer."""
+    tokens = re.sub(r"[^\w\s]", " ", text.lower()).split()
+    return " ".join(_ru_stemmer.stem(t) for t in tokens)
+
 
 # ---------------------------------------------------------------------------
 # Локальный Ollama — тот же стек что в rpd_generate.py
@@ -86,29 +132,14 @@ _ST_MAP: dict = {
 # Embedding + cosine similarity (локальный Ollama / bge-m3)
 # ---------------------------------------------------------------------------
 def embed(text: str) -> list[float]:
-    """Получает эмбеддинг через локальный Ollama (bge-m3). Без внешних API."""
-    for attempt in range(3):
-        try:
-            r = requests.post(
-                OLLAMA["embed_url"],
-                json={"model": OLLAMA["embed_model"], "input": f"query: {text}"},
-                timeout=60,
-            )
-            r.raise_for_status()
-            d = r.json()
-            # Ollama ≥0.6: {"embeddings": [[...float...]]}
-            embeddings = d.get("embeddings")
-            if embeddings and isinstance(embeddings, list) and embeddings[0]:
-                return embeddings[0]
-            # Ollama <0.6: {"embedding": [...float...]}
-            vec = d.get("embedding")
-            if vec:
-                return vec
-        except Exception as e:
-            if attempt == 2:
-                raise RuntimeError(f"embed failed: {e}") from e
-            time.sleep(2 ** attempt)
-    return []
+    """Получает эмбеддинг через utils.get_embedding с локальным кэшем. [FIX-#9, #18]"""
+    if text in _EMBED_CACHE:
+        return _EMBED_CACHE[text]
+    vec = _embed_raw(text, prefix="query", retry=3)
+    if not vec:
+        raise RuntimeError(f"embed failed for text[:50]={text[:50]!r}")
+    _EMBED_CACHE[text] = vec
+    return vec
 
 
 def cosine_sim(a: list[float], b: list[float]) -> float:
@@ -120,11 +151,12 @@ def cosine_sim(a: list[float], b: list[float]) -> float:
 # ---------------------------------------------------------------------------
 # Извлечение текста из docx
 # ---------------------------------------------------------------------------
-def _table_header_set(table, max_rows: int = 3) -> frozenset:
+def _table_header_set(table, max_rows: int = 5) -> frozenset:
     """
     Frozenset уникальных текстов ячеек из первых max_rows строк.
-    Логика совпадает с _table_header_set() в rpd_generate.py:
-    merged-ячейки дедублируются по id(cell._tc).
+    [FIX-#10] max_rows поднят с 3 до 5 — синхронизировано с rpd_generate.py
+    (_table_header_set там тоже max_rows=5). Расхождение давало разные
+    результаты детекции таблиц при оценке vs генерации.
     """
     texts = set()
     for row in table.rows[:max_rows]:
@@ -460,11 +492,13 @@ def compute_bleu(hypothesis: str, reference: str) -> float:
 
 
 def compute_rouge(hypothesis: str, reference: str) -> dict[str, float]:
-    """ROUGE-1, ROUGE-2, ROUGE-L (F1). rouge_scorer.score(target, prediction)."""
+    """ROUGE-1, ROUGE-2, ROUGE-L (F1). Тексты предварительно стеммируются
+    через SnowballStemmer('russian') — устраняет занижение 10–20% из-за
+    морфологии (нейронных ≠ нейронные). [FIX-ROUGE]"""
     if not hypothesis.strip() or not reference.strip():
         return {"rouge1": 0.0, "rouge2": 0.0, "rougeL": 0.0}
     scorer = rs_lib.RougeScorer(["rouge1", "rouge2", "rougeL"], use_stemmer=False)
-    scores = scorer.score(reference, hypothesis)   # (target, prediction)
+    scores = scorer.score(_stem_ru(reference), _stem_ru(hypothesis))
     return {
         "rouge1": round(scores["rouge1"].fmeasure, 4),
         "rouge2": round(scores["rouge2"].fmeasure, 4),
@@ -530,6 +564,7 @@ def compute_all_metrics(
 # Entry point
 # ---------------------------------------------------------------------------
 def main() -> None:
+    _load_eval_cache()  # [FIX-#9] загружаем кэш эмбеддингов
     parser = argparse.ArgumentParser(
         description="Оценка качества РПД (BLEU + ROUGE)"
     )
@@ -748,6 +783,7 @@ def main() -> None:
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
     print(f"\n✅ Отчёт сохранён: {args.out}\n")
+    _save_eval_cache()  # [FIX-#9] сохраняем кэш эмбеддингов
 
 
 if __name__ == "__main__":

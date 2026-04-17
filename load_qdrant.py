@@ -39,15 +39,17 @@ import json
 import time
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
+# [FIX-#18] Единая embed-функция из utils.py
+# [FIX-§5] EMBED_MODEL импортируется из utils: единая точка изменения модели.
+#           OLLAMA_URL удалён — мёртвый код после делегирования embed в utils.py.
+from utils import get_embedding as _embed_raw_utils, EMBED_MODEL
 
 COLLECTION     = "rpd_rag"
-EMBED_MODEL    = "bge-m3"
-# [SYNC] Унифицировано с rpd_generate.py: оба файла используют /api/embed (Ollama ≥0.6).
-# Старый endpoint /api/embeddings требовал "prompt" и возвращал {"embedding": [...]}.
-# Новый /api/embed принимает "input" и возвращает {"embeddings": [[...]]}.
-OLLAMA_URL     = "http://localhost:11434/api/embed"
 QDRANT_URL     = "http://localhost:6333"
-BATCH_EMBED    = 8       # [M] количество параллельных потоков embedding
+BATCH_EMBED    = 1       # [M] количество параллельных потоков embedding
+# [FIX-#16] Прежний комментарий «снижено с 8 до 4» расходился с фактическим
+# значением 1. Значение 1 оптимально для локального Ollama: параллельные запросы
+# к одному GPU не дают прироста, а только создают очередь.
 UPSERT_BATCH   = 64
 CHUNKS_FILE    = "chunks.jsonl"
 RETRY_COUNT    = 3
@@ -70,47 +72,14 @@ MAX_EMBED_CHARS = 4000
 
 def embed_text(text: str) -> list | None:
     """
-    Получает embedding для одного текста через Ollama.
-
-    [N] Тексты длиннее MAX_EMBED_CHARS обрезаются с предупреждением.
-    Retry с экспоненциальной задержкой при сетевых ошибках.
+    Получает embedding для одного текста через utils.get_embedding.
+    [FIX-#18] Делегируем в единую реализацию; prefix='passage' для индексируемых текстов.
+    [N] Тексты длиннее MAX_EMBED_CHARS обрезаются внутри utils.get_embedding.
     """
     if len(text) > MAX_EMBED_CHARS:
         print(f"  ⚠️  Текст обрезан: {len(text)} → {MAX_EMBED_CHARS} символов")
-        text = text[:MAX_EMBED_CHARS]
-
-    delay = RETRY_DELAY
-    for attempt in range(1, RETRY_COUNT + 1):
-        try:
-            r = requests.post(
-                OLLAMA_URL,
-                # [SYNC] /api/embed принимает "input" (не "prompt").
-                # Префикс "passage:" — инструкция bge-m3 для индексируемых текстов.
-                json={"model": EMBED_MODEL, "input": f"passage: {text}"},
-                timeout=120,
-            )
-            r.raise_for_status()
-            d = r.json()
-            # Формат /api/embed (Ollama ≥0.6): {"embeddings": [[...float...]]}
-            embeddings = d.get("embeddings")
-            if embeddings and isinstance(embeddings, list) and embeddings[0]:
-                return embeddings[0]
-            # Fallback: старый формат {"embedding": [...]} на случай downgrade Ollama
-            vec = d.get("embedding")
-            if not vec:
-                data_list = d.get("data") or []
-                vec = data_list[0].get("embedding") if data_list else None
-            if vec:
-                return vec
-        except Exception as e:
-            if attempt < RETRY_COUNT:
-                print(f"  Попытка {attempt}/{RETRY_COUNT}: {e}. Повтор через {delay:.0f}с...")
-                time.sleep(delay)
-                delay *= 2
-            else:
-                print(f"  Embedding не получен: {e}")
-                return None
-    return None
+    vec = _embed_raw_utils(text, prefix="passage", retry=RETRY_COUNT)
+    return vec if vec else None
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +310,10 @@ def main(append_mode: bool = False):
                 "id":            ch["id"],
                 "doc_id":        ch.get("doc_id", ""),
                 "source":        ch.get("source", ""),
+                # [FIX-#8] Дублируем source как source_file для совместимости
+                # с book_loader: retrieve_for_section() читает оба ключа,
+                # но явный source_file исключает скрытый double-get.
+                "source_file":   ch.get("source", ""),
                 "section_title": ch.get("section_title", ""),
                 "section_level": ch.get("section_level", ""),
                 "doc_position":  ch.get("doc_position", 0),  # [H] из chunking.py

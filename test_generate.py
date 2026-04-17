@@ -27,6 +27,7 @@ test_generate.py — генерация тестовых заданий (ФОС)
 
 import argparse
 import json
+import random
 import re
 import sys
 import time
@@ -35,6 +36,8 @@ from pathlib import Path
 from typing import Optional
 
 import requests
+# [FIX-#18] Единая embed-функция из utils.py (unifies /api/embed, prefix, retry)
+from utils import get_embedding as _embed_raw
 from docx import Document
 from docx.shared import Pt, RGBColor, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -54,6 +57,12 @@ OLLAMA = {
     "generate_url": "http://localhost:11434/api/generate",
     "embed_model":  "bge-m3",
     "llm_model":    "qwen2.5:14b",
+    # Ограничение нагрева GPU:
+    # num_ctx: уменьшен с 8192 → 4096 (меньше VRAM, промпты редко превышают 3k токенов)
+    # num_gpu: кол-во слоёв на GPU (qwen2.5:14b ≈ 48 слоёв);
+    #          уменьшите до 20–30 если GPU всё равно греется сильно
+    "num_ctx": 4096,
+    "num_gpu": 30,   # 48 = все слои на GPU (без изменений); снизьте для охлаждения
 }
 
 GENERATION = {
@@ -71,7 +80,7 @@ RANKS = {
 }
 
 # Минимальное число вопросов
-MIN_PER_RANK    = 10   # базовый минимум; итого 30 на раздел при 3 рангах
+MIN_PER_RANK    = 15   # [FIX-§15.5.1] поднят с 10 → 15; итого 45 на раздел
 MIN_PER_SECTION = 30
 MIN_PER_COMP    = 100
 
@@ -119,34 +128,13 @@ def clean(text: str) -> str:
 
 
 def get_embedding(text: str) -> list:
+    # [FIX-#18] Делегируем в utils.get_embedding; кэш остаётся здесь
     if text in EMBED_CACHE:
         return EMBED_CACHE[text]
-    for attempt in range(3):
-        try:
-            r = requests.post(
-                OLLAMA["embed_url"],
-                json={"model": OLLAMA["embed_model"], "input": f"query: {text}"},
-                timeout=60)
-            r.raise_for_status()
-            d = r.json()
-            embeddings = d.get("embeddings")
-            if embeddings and isinstance(embeddings, list) and embeddings[0]:
-                vec = embeddings[0]
-                EMBED_CACHE[text] = vec
-                return vec
-            vec = d.get("embedding")
-            if not vec:
-                data_list = d.get("data") or []
-                vec = data_list[0].get("embedding") if data_list else None
-            if vec:
-                EMBED_CACHE[text] = vec
-                return vec
-        except Exception as e:
-            if attempt == 2:
-                print(f"  ⚠️  Ошибка эмбеддинга: {e}")
-                return []
-            time.sleep(2 ** attempt)
-    return []
+    vec = _embed_raw(text, prefix="query", retry=3)
+    if vec:
+        EMBED_CACHE[text] = vec
+    return vec
 
 
 def _search_qdrant(vec: list, payload_filter: Optional[dict], top_k: int) -> list:
@@ -192,14 +180,20 @@ def retrieve_for_section(section_name: str, discipline: str,
     ]
 
     section_types = ["book_content", "content"]
-    payload_filter = {
-        "must": [{
-            "should": [
-                {"key": "section_type", "match": {"value": st}}
-                for st in section_types
-            ]
-        }]
-    }
+    # [FIX-SHOULD1] При одном section_type Qdrant отклоняет should-обёртку (HTTP 400).
+    if len(section_types) == 1:
+        payload_filter = {
+            "must": [{"key": "section_type", "match": {"value": section_types[0]}}]
+        }
+    else:
+        payload_filter = {
+            "must": [{
+                "should": [
+                    {"key": "section_type", "match": {"value": st}}
+                    for st in section_types
+                ]
+            }]
+        }
 
     all_hits: dict = {}
     for query_text in queries:
@@ -269,16 +263,21 @@ def llm(prompt: str, max_tokens: int = 1200) -> str:
                     "model": OLLAMA["llm_model"],
                     "prompt": prompt,
                     "stream": False,
+                    # [FIX-§2.2.4] keep_alive: 0 удалён: он выгружал 14 ГБ модель из VRAM
+                    # после каждого вызова → ~20 перезагрузок → потеря 200–600 сек.
+                    # Модель остаётся в памяти между вызовами (поведение по умолчанию).
                     "options": {
                         "temperature": 0.4,
                         "num_predict": max_tokens,
-                        "num_ctx": 8192,
+                        "num_ctx": OLLAMA["num_ctx"],
+                        "num_gpu": OLLAMA["num_gpu"],
                     }
                 },
                 timeout=300)
             r.raise_for_status()
             text = r.json().get("response", "")
             if text:
+                time.sleep(3)  # [FIX-§2.2.4] пауза 3 сек вместо 1 — охлаждение GPU без выгрузки
                 return clean(text)
         except Exception as e:
             if attempt == 2:
@@ -289,33 +288,48 @@ def llm(prompt: str, max_tokens: int = 1200) -> str:
 
 # ── Парсинг РПД ───────────────────────────────────────────────────────────────
 
-# Маппинг раздел → компетенции (из таблицы FOS в РПД)
-# Парсится автоматически, но если не удалось — fallback
-_DEFAULT_SECTION_COMP = {
-    1: ["УК-1", "ОПК-1"],
-    2: ["ОПК-1", "ОПК-2"],
-    3: ["ОПК-2", "ПК-1", "ПК-2"],
-}
+def _build_default_section_comp(n_sections: int) -> dict[int, list[str]]:
+    """
+    [FIX-#6] Строит маппинг раздел→компетенции из config.json вместо
+    захардкоженного словаря под конкретную дисциплину.
+    [FIX-§6.1.4] Читает section_competency_matrix если задана — устраняет
+    дисбаланс (Раздел 1: 5 компетенций vs. Разделы 2–3: 2), который приводил
+    к ПК-2/УК-1 < 100 вопросов. При отсутствии матрицы равномерно распределяет
+    все компетенции по всем разделам (прежнее поведение).
+    """
+    try:
+        cfg = json.loads(Path(CONFIG_PATH).read_text(encoding="utf-8"))
+        codes_raw = cfg.get("competency_codes", "")
+        codes = [c.strip() for c in codes_raw.split(",") if c.strip()]
+        if not codes:
+            codes = list(cfg.get("fgos_competencies", {}).keys())
+        # [FIX-§6.1.4] Матрица раздел→компетенции из config.json
+        matrix = cfg.get("section_competency_matrix")
+        if matrix:
+            result = {}
+            for i in range(1, n_sections + 1):
+                sec_codes = matrix.get(str(i))
+                result[i] = list(sec_codes) if sec_codes else list(codes)
+            return result
+    except Exception:
+        codes = []
+    if not codes:
+        codes = ["УК-1", "ОПК-1", "ОПК-2", "ПК-1", "ПК-2"]
+    return {i: list(codes) for i in range(1, n_sections + 1)}
 
 
 def parse_rpd_sections(rpd_path: Path) -> list[dict]:
     """
     Извлекает разделы дисциплины из output_rpd.docx.
 
-    Возвращает список:
-    [
-        {
-            "num":          1,
-            "name":         "Нейронные сети и глубокое обучение",
-            "competencies": ["УК-1", "ОПК-1"],
-            "topics":       ["Архитектуры нейронных сетей...", "Глубокое обучение..."],
-        },
-        ...
-    ]
+    [FIX-#5] Добавлен стоп-список ФОС-строк: строки «форм», «контрол»,
+    «аттестац», «перечень оценочных», «промежуточн», «текущ» — не являются
+    темами дисциплины и фильтруются. Добавлен cap topics[:6].
+    [FIX-#6] Дефолтный маппинг компетенций строится из config.json, а не
+    из захардкоженного _DEFAULT_SECTION_COMP.
     """
     doc = Document(str(rpd_path))
 
-    # Собираем весь текст параграфов
     paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
 
     sections = []
@@ -327,6 +341,50 @@ def parse_rpd_sections(rpd_path: Path) -> list[dict]:
         r"^(?:Тема\s+\d+[.\s:]+|[-–•]\s*)(.+)$"
     )
 
+    # [FIX-§2.2.1] Расширенный стоп-список ФОС и служебных заголовков РПД.
+    # Исходный список не блокировал разделы 6.1/7/8 — «учебно-методическое
+    # обеспечение» и «материально-техническое обеспечение» попадали в темы,
+    # и LLM генерировал вопросы о кабинетах и лицензиях вместо дисциплины.
+    _FOS_STOPWORDS = (
+        "форм", "перечень оценочн", "контрол", "аттестац",
+        "промежуточн", "текущ", "фонд оценочн", "критери",
+        "шкал", "показател оценивани",
+        # [FIX-§2.2.1] Служебные разделы РПД (6.1, 7, 8)
+        "учебно-методич", "материально-технич", "обеспечени",
+        "программн обеспечени", "перечень ресурс",
+        # [FIX-§15.3.1] ОВЗ / доступность — бойлерплейт, одинаковый во всех РПД.
+        # 8 из 31 вопроса Ранга 3 генерировались по этим строкам вместо тем дисциплины.
+        "ограниченн возможност", "лиц с ограниченн", "инвалид",
+        "обеспеченност дисциплин", "особых образоват",
+        "условия для лиц", "доступн среда", "адаптированн",
+    )
+    # [FIX-§2.2.1] Строки вида «6.1.», «7.», «8.» — заголовки разделов РПД,
+    # не темы дисциплины. Паттерн: начинается с цифра.цифра или цифра. + пробел/буква.
+    _NUMERIC_HEADER_RE = re.compile(r"^\d+[\.\d]*[\.\s]")
+
+    # [FIX-§15.3.1] Whitelist по discipline_focus из config.json.
+    # Если строка содержит хотя бы одно ключевое слово из discipline_focus —
+    # она проходит независимо от стоп-слов (защита от ложных срабатываний
+    # на технические термины вроде «доступность данных», «обеспечение API»).
+    _focus_keywords: list[str] = []
+    try:
+        _cfg_raw = json.loads(Path(CONFIG_PATH).read_text(encoding="utf-8"))
+        _focus_raw = _cfg_raw.get("discipline_focus", "")
+        if _focus_raw:
+            # Разбиваем по запятым/переносам, берём слова длиной ≥5
+            _focus_keywords = [
+                w.strip().lower() for w in re.split(r"[,\n]+", _focus_raw)
+                if len(w.strip()) >= 5
+            ]
+    except Exception:
+        pass
+
+    def _is_whitelisted(txt: str) -> bool:
+        if not _focus_keywords:
+            return False
+        tl = txt.lower()
+        return any(kw in tl for kw in _focus_keywords)
+
     for text in paragraphs:
         m = section_pattern.match(text)
         if m:
@@ -335,18 +393,24 @@ def parse_rpd_sections(rpd_path: Path) -> list[dict]:
             current_section = {
                 "num":          int(m.group(1)),
                 "name":         m.group(2).strip().rstrip("."),
-                "competencies": _DEFAULT_SECTION_COMP.get(int(m.group(1)), ["УК-1"]),
+                # [FIX-#6] компетенции из config.json заполняются после сборки разделов
+                "competencies": [],
                 "topics":       [],
             }
             continue
 
-        # Попытка поймать темы внутри раздела
         if current_section:
             tm = topic_pattern.match(text)
+            # [FIX-§2.2.1] Пропускаем служебные ФОС-строки
+            # [FIX-§15.3.1] Whitelist: если строка совпадает с discipline_focus — не блокируем
+            if any(sw in text.lower() for sw in _FOS_STOPWORDS) and not _is_whitelisted(text):
+                continue
+            # [FIX-§2.2.1] Пропускаем заголовки разделов РПД: «6.1. Учебно-...», «7.», «8.»
+            if _NUMERIC_HEADER_RE.match(text):
+                continue
             if tm and len(text) > 15:
                 current_section["topics"].append(tm.group(1).strip())
             elif len(text) > 30 and not section_pattern.match(text):
-                # Контентные строки без маркера — могут быть темами
                 if not any(kw in text for kw in
                            ["Трудоем", "Семестр", "Форма", "Кафедр", "Зачетн",
                             "ИТОГО", "подготовка", "выполнение", "изучение"]):
@@ -355,11 +419,16 @@ def parse_rpd_sections(rpd_path: Path) -> list[dict]:
     if current_section:
         sections.append(current_section)
 
-    # Если разделы не нашлись стандартным способом — ищем в таблицах
     if not sections:
         sections = _parse_sections_from_tables(doc)
 
-    # Добавляем компетенции из таблиц РПД (перезаписывает дефолтный маппинг)
+    # [FIX-#6] Строим дефолтный маппинг из config.json ПОСЛЕ сборки разделов
+    _default_comp = _build_default_section_comp(len(sections))
+    for s in sections:
+        s["competencies"] = _default_comp.get(s["num"], list(_default_comp.get(1, ["УК-1"])))
+        # [FIX-#5] Ограничиваем число тем на раздел
+        s["topics"] = s["topics"][:6]
+
     _enrich_with_comp_from_tables(doc, sections)
 
     print(f"📋 РПД: найдено {len(sections)} разделов")
@@ -389,7 +458,8 @@ def _parse_sections_from_tables(doc: Document) -> list[dict]:
                         sections.append({
                             "num":          num,
                             "name":         m.group(2).strip().rstrip("."),
-                            "competencies": _DEFAULT_SECTION_COMP.get(num, ["УК-1"]),
+                            # [FIX-#6] заполняется в parse_rpd_sections после сборки
+                            "competencies": [],
                             "topics":       [],
                         })
 
@@ -410,8 +480,10 @@ def _enrich_with_comp_from_tables(doc: Document, sections: list[dict]) -> None:
     for table in doc.tables:
         for row in table.rows:
             row_text = " ".join(cell.text.strip() for cell in row.cells)
-            # Ищем номер раздела в строке
-            sec_m = re.search(r"\b(\d+)\b", row_text)
+            # [FIX-§10.1] Заменён \b(\d+)\b на явный паттерн «Раздел N».
+            # Старый regex \b(\d+)\b срабатывал на ЛЮБОЕ число в строке (часы,
+            # страницы, з.е.) и ошибочно привязывал компетенции к этим «номерам».
+            sec_m = re.search(r"Раздел\s+(\d+)", row_text, re.IGNORECASE)
             if not sec_m:
                 continue
             num = int(sec_m.group(1))
@@ -445,12 +517,13 @@ RANK_PROMPTS = {
 - Варианты ответов могут быть развёрнутыми (2-3 предложения)
 - Дистракторы содержат правдоподобные но неверные утверждения
 """,
-    3: """Сгенерируй {n} тестовых вопросов РАНГА 3 (анализ и синтез).
+    3: """Сгенерируй РОВНО {n} тестовых вопросов РАНГА 3 (анализ и синтез).
 Правила для ранга 3:
 - Вопрос требует анализа, синтеза или выбора нескольких верных утверждений
-- НЕСКОЛЬКО правильных ответов из 4-5 вариантов (2-4 правильных)
+- НЕСКОЛЬКО правильных ответов из 4 вариантов: ровно 2-3 правильных
 - Формулировка вопроса явно указывает «Выберите ВСЕ верные утверждения» или аналог
 - Дистракторы — частично верные или инвертированные утверждения
+- Обязательно вывести РОВНО {n} блоков ЗАДАНИЕ/А)/Б)/В)/Г)/ПРАВИЛЬНЫЙ
 """,
 }
 
@@ -481,6 +554,68 @@ _PROMPT_TEMPLATE = """\
 
 Выведи ровно {n} таких блоков. Без нумерации, без пояснений вне блоков.
 """
+
+
+def _shuffle_answers(q: dict) -> dict:
+    """
+    [FIX-§2.2.2] Рандомизирует позицию правильного ответа.
+
+    LLM всегда помещает правильный ответ на позицию А) — студент мог угадывать,
+    всегда выбирая А). Перемешиваем тексты вариантов случайно, оставляя
+    метки (А/Б/В/Г) на месте, затем пересчитываем correct_letters по тексту.
+    """
+    labels = list(q["answers"].keys())
+    texts = list(q["answers"].values())
+    random.shuffle(texts)
+    new_answers = dict(zip(labels, texts))
+    correct_texts_set = set(q["correct_texts"])
+    new_correct = [lbl for lbl, txt in new_answers.items() if txt in correct_texts_set]
+    if not new_correct:
+        # fallback: не меняем, если не удалось найти правильные после перемешивания
+        return q
+    return {**q,
+            "answers":         new_answers,
+            "correct_letters": new_correct,
+            "correct_texts":   [new_answers[l] for l in new_correct]}
+
+
+def _filter_duplicate_distractors(questions: list[dict]) -> list[dict]:
+    """
+    [FIX-§2.2.3] Удаляет вопросы с повторяющимися дистракторами.
+
+    LLM повторяет «безопасные» формулировки дистракторов в 5+ вопросах подряд.
+    Считаем частоту каждого дистрактора (неправильного варианта) внутри батча.
+    Вопросы, у которых ≥2 дистракторов встречаются 3+ раз — исключаются.
+    """
+    from collections import Counter
+    distractor_count: Counter = Counter()
+    for q in questions:
+        for lbl, txt in q["answers"].items():
+            if lbl not in q["correct_letters"]:
+                distractor_count[txt.lower().strip()] += 1
+
+    spam = {t for t, n in distractor_count.items() if n >= 3}
+    if not spam:
+        return questions
+
+    print(f"  ⚠️  [§2.2.3] Повторяющихся дистракторов: {len(spam)} шт. "
+          f"(примеры: {list(spam)[:2]})")
+
+    filtered = []
+    removed = 0
+    for q in questions:
+        spam_hits = sum(
+            1 for lbl, txt in q["answers"].items()
+            if lbl not in q["correct_letters"] and txt.lower().strip() in spam
+        )
+        if spam_hits >= 2:
+            removed += 1
+        else:
+            filtered.append(q)
+
+    if removed:
+        print(f"  ✂️  Исключено {removed} вопросов с дублями дистракторов")
+    return filtered
 
 
 def _parse_questions_from_llm(raw: str, rank: int,
@@ -592,6 +727,8 @@ def _parse_questions_from_llm(raw: str, rank: int,
         })
         q_idx += 1
 
+    # [FIX-§2.2.2] Рандомизируем позицию правильного ответа
+    questions = [_shuffle_answers(q) for q in questions]
     return questions
 
 
@@ -656,7 +793,11 @@ def generate_questions_for_section(
                 n=n_per_topic,
             )
 
-            raw = llm(prompt, max_tokens=1400)
+            # [FIX-§15.5.2] num_predict зависит от ранга:
+            # Ранг 3 требует НЕСКОЛЬКО правильных — 1400 токенов обрезало
+            # ответ после 1-го вопроса из 10.
+            _max_tok = 2000 if rank == 3 else 1400
+            raw = llm(prompt, max_tokens=_max_tok)
 
             parsed = _parse_questions_from_llm(
                 raw,
@@ -684,7 +825,7 @@ def generate_questions_for_section(
                 context=ctx[:MAX_CONTEXT_CHARS],
                 n=shortage + 2,
             )
-            raw = llm(prompt, max_tokens=1400)
+            raw = llm(prompt, max_tokens=2000 if rank == 3 else 1400)  # [FIX-§15.5.2]
             extra = _parse_questions_from_llm(
                 raw, rank=rank, section_num=sec_num,
                 topic_num=len(topics) + 1,
@@ -694,6 +835,8 @@ def generate_questions_for_section(
             global_idx += len(extra)
 
         print(f"     ✅ Ранг {rank}: итого {len(rank_questions)} вопросов")
+        # [FIX-§2.2.3] Пост-фильтр дублирующихся дистракторов внутри ранга
+        rank_questions = _filter_duplicate_distractors(rank_questions)
         all_questions.extend(rank_questions)
 
     print(f"  ✅ Раздел {sec_num}: всего {len(all_questions)} вопросов")
@@ -1075,6 +1218,9 @@ def main():
         )
         all_questions.extend(qs)
         _save_cache()
+        if sections.index(section) < len(sections) - 1:
+            print("  ⏸️  Пауза 5 сек для охлаждения GPU...")
+            time.sleep(5)  # пауза между разделами
 
     print(f"\n📦 Итого сгенерировано вопросов: {len(all_questions)}")
 

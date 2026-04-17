@@ -49,6 +49,8 @@ import json
 import re
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
+# [§3.2.1] Единая классификация разделов — вынесена в utils.py
+from utils import classify_section
 
 RPD_CORPUS         = "rpd_corpus"
 RPD_JSON           = "rpd_json"
@@ -62,37 +64,6 @@ KEY_HEADERS        = [
     "Результаты обучения", "Содержание дисциплины",
 ]
 SECTION_RE = re.compile(SECTION_REGEX)
-
-SECTION_TYPE_MAP = [
-    (["цел", "задач"],                                              "goals"),
-    (["компетенц"],                                                 "competencies"),
-    (["доступн", "инвалид", "огранич", "здоровь", "овз"],         "accessibility"),
-    (["результат обучен", "индикатор"],                            "learning_outcomes"),
-    (["содержани", "тематическ"],                                   "content"),
-    # [БАГ-А ИСПРАВЛЕНО]: "лабораторн"/"практическ"/"семинар" → "content".
-    # Прежде эти ключевые слова давали section_type="assessment", что противоречит
-    # classify_section() в chunking.py (там те же слова → "content").
-    # build_metadata() отдаёт приоритет block_stype из converter → чанки
-    # лабораторных работ оседали в Qdrant под тегом "assessment" и были
-    # невидимы для retrieval-запросов с фильтром section_type="content".
-    # "самостоятельн" оставлен в "assessment" — согласован с [FIX-1б] в chunking.py.
-    (["лабораторн", "практическ", "семинар"],                       "content"),
-    (["самостоятельн"],                                              "assessment"),
-    (["трудоёмк", "трудоемк", "объём", "объем", "часов", "учебн", "нагрузк"], "hours"),
-    (["фонд оценочн", "оценочн", "контрол", "аттестац",
-      "промежуточн", "текущ"],                                      "assessment"),
-    # [8] ИСПРАВЛЕНО: "литератур", "библиограф", "учебно-методич" выделены
-    # в отдельный тип "bibliography" — согласовано с classify_section() в chunking.py.
-    # Раньше они попадали в "place", что делало разделы литературы невидимыми
-    # для retrieval-фильтров с section_type = "bibliography".
-    # [З-C1] ИСПРАВЛЕНО: добавлены "учебной литератур", "обеспеченност", "сведени" —
-    # заголовок «СВЕДЕНИЯ об обеспеченности дисциплины учебной литературой» не
-    # содержал прежних ключевых слов → попадал в "other" → 0 чанков bibliography
-    # в Qdrant → retrieval литературы всегда возвращал пустой контекст → fallback.
-    (["литератур", "библиограф", "учебно-методич",
-      "учебной литератур", "обеспеченност", "сведени"],             "bibliography"),
-    (["ресурс", "библиотек", "программн", "информационн"],         "place"),
-]
 
 
 # ---------------------------------------------------------------------------
@@ -118,9 +89,7 @@ def _normalize_level(level_raw) -> int:
     if isinstance(level_raw, int):
         return min(level_raw, 6)
     s = str(level_raw).strip()
-    # Строка вида "2.1.3" — считаем глубину
     parts = s.split(".")
-    # Если первая часть — не цифра (e.g. "heading"), ищем первую цифру
     if not parts[0].isdigit():
         m = re.search(r"\d+", s)
         return min(int(m.group()), 6) if m else 0
@@ -128,13 +97,10 @@ def _normalize_level(level_raw) -> int:
 
 
 def detect_section_type(section_title: Optional[str]) -> str:
-    if not section_title:
-        return "other"
-    t = section_title.lower()
-    for keywords, stype in SECTION_TYPE_MAP:
-        if any(kw in t for kw in keywords):
-            return stype
-    return "other"
+    """[§3.2.1] Делегирует в utils.classify_section — единая реализация."""
+    return classify_section(section_title or "")
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +205,17 @@ def extract_key_table_rows(
         effective_type = "learning_outcomes" if any(
             kw in row_lower for kw in ("знать:", "уметь:", "владеть:", "з(", "у(", "в(")
         ) else section_type
+        # [FIX-CONTENT-SUBTYPES] Подтипирование content → lecture_content/lab_content/practice_content.
+        # Корневая причина BLEU 0.02 для practice (отчёт §1.3, §7.6):
+        # classify_section() объединяет лекции, ЛР и ПЗ в один тип content.
+        # Теперь при section_type="content" определяем подтип по ключевым словам.
+        if effective_type == "content":
+            if any(kw in row_lower for kw in ("лабораторн", "лр №", "лр.", "лаб. раб")):
+                effective_type = "lab_content"
+            elif any(kw in row_lower for kw in ("практическ", "пз №", "практ. зан", "семинар")):
+                effective_type = "practice_content"
+            elif any(kw in row_lower for kw in ("лекция", "лекц.")):
+                effective_type = "lecture_content"
         blocks.append({
             "document_id":   document_id,
             "title":         doc_name,
@@ -251,11 +228,33 @@ def extract_key_table_rows(
     return blocks
 
 
+def _normalize_title(title: str) -> str:
+    """
+    [FIX-TITLE-NORM] Нормализация title — удаление табличного мусора из заголовков.
+    
+    Критическое исправление (отчёт §2.4): title в корпусе содержит табличный мусор
+    вида «2 | Извлечение знаний из нейронных сетей | 7 | 3 | 9 | 4 | 1»,
+    что приводит к ненадёжному title-поиску в evaluate (score 0.478).
+    """
+    if not title:
+        return title
+    if " | " in title:
+        parts = [p.strip() for p in title.split("|")]
+        text_parts = [p for p in parts if p and not re.match(r"^\d+$", p) and len(p) > 3]
+        if text_parts:
+            title = max(text_parts, key=len)
+    title = re.sub(r"^\d+\s+", "", title.strip())
+    title = re.sub(r"\s+\d+$", "", title.strip())
+    return title.strip()
+
+
 def extract_document_metadata(doc: Document) -> Dict:
     """[7] Метаданные документа — хранятся НА ВЕРХНЕМ УРОВНЕ JSON, не в чанке."""
     core = doc.core_properties
+    # [FIX-TITLE-NORM] Нормализация title для устранения табличного мусора
+    raw_title = core.title or ""
     return {
-        "title":            core.title    or "",
+        "title":            _normalize_title(raw_title),
         "subject":          core.subject  or "",
         "author":           core.author   or "",
         "keywords":         core.keywords or "",
@@ -282,7 +281,10 @@ def is_section_heading(text: str, style_name: Optional[str] = None) -> Tuple[boo
     for kw in KEY_HEADERS:
         if text.lower().startswith(kw.lower()):
             return True, 1
-    if text.isupper() and len(text) < 100 and not text.endswith("."):
+    # [10.2] ИСПРАВЛЕНО: добавлено len(text.split()) >= 3 — предотвращает ложные
+    # срабатывания на "ИТОГО", аббревиатурах (ОВЗ, ФГОС) и кодах в таблицах.
+    # Реальные заголовки в верхнем регистре всегда содержат >= 3 слов.
+    if text.isupper() and len(text) < 100 and not text.endswith(".") and len(text.split()) >= 3:
         return True, 2
     return False, 0
 
@@ -417,12 +419,24 @@ def process_document(doc_path: Path) -> Dict:
         nonlocal buffer
         for chunk in split_into_chunks(buffer):
             if len(chunk.split()) >= MIN_CHUNK_WORDS:
+                # [FIX-CONTENT-SUBTYPES] Подтипирование текстовых блоков content.
+                # Аналогично extract_key_table_rows: при current_stype="content"
+                # определяем подтип по ключевым словам заголовка раздела.
+                effective_stype = current_stype
+                if effective_stype == "content" and current_section:
+                    sec_lower = current_section.lower()
+                    if any(kw in sec_lower for kw in ("лабораторн", "лр ", "лаб.")):
+                        effective_stype = "lab_content"
+                    elif any(kw in sec_lower for kw in ("практическ", "пз ", "семинар")):
+                        effective_stype = "practice_content"
+                    elif any(kw in sec_lower for kw in ("лекци",)):
+                        effective_stype = "lecture_content"
                 chunks.append({
                     "document_id":   doc_id,
                     "title":         doc_path.name,
                     "section_title": current_section,
                     "section_level": current_level,   # [6] int
-                    "section_type":  current_stype,
+                    "section_type":  effective_stype,
                     "text":          chunk,
                     "type":          "text",
                 })

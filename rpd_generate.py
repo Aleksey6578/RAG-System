@@ -59,7 +59,10 @@ import os
 import shutil
 import time
 import copy
+from pathlib import Path
 import requests
+# [FIX-#18] Единая embed-функция из utils.py
+from utils import get_embedding as _embed_raw
 from typing import Optional
 from lxml import etree
 from docx import Document
@@ -157,13 +160,14 @@ def _print_similar_disciplines(discipline: str, corpus_dir: str = "rpd_corpus",
       2. metadata['subject']
       3. data_clean.jsonl → поле 'discipline'
     """
-    import math, glob as _glob
+    import glob as _glob
+    import numpy as _np  # [FIX-#15] numpy вместо pure-Python cosine (math.sqrt loops)
 
+    # [FIX-#15] numpy cosine similarity: быстрее и читаемее, numpy уже в зависимостях
     def _cosine(a, b):
-        dot = sum(x * y for x, y in zip(a, b))
-        na  = math.sqrt(sum(x * x for x in a))
-        nb  = math.sqrt(sum(x * x for x in b))
-        return dot / (na * nb) if na and nb else 0.0
+        va, vb = _np.array(a, dtype=float), _np.array(b, dtype=float)
+        denom = _np.linalg.norm(va) * _np.linalg.norm(vb)
+        return float(_np.dot(va, vb) / denom) if denom > 1e-10 else 0.0
 
     _CODE_RE = re.compile(r"^\(\d+\)\s*(.+)$")
 
@@ -315,34 +319,13 @@ def clean(text: str) -> str:
 
 
 def get_embedding(text: str):
+    # [FIX-#18] Делегируем в utils.get_embedding; кэш остаётся здесь
     if text in EMBED_CACHE:
         return EMBED_CACHE[text]
-    for attempt in range(3):
-        try:
-            r = requests.post(OLLAMA["embed_url"],
-                json={"model": OLLAMA["embed_model"], "input": f"query: {text}"},
-                timeout=60)
-            r.raise_for_status()
-            d = r.json()
-            # Новый формат /api/embed (Ollama ≥0.6): {"embeddings": [[...float...]]}
-            embeddings = d.get("embeddings")
-            if embeddings and isinstance(embeddings, list) and embeddings[0]:
-                vec = embeddings[0]
-                EMBED_CACHE[text] = vec
-                return vec
-            # Старый формат /api/embeddings: {"embedding": [...float...]}
-            vec = d.get("embedding")
-            if not vec:
-                data_list = d.get("data") or []
-                vec = data_list[0].get("embedding") if data_list else None
-            if vec:
-                EMBED_CACHE[text] = vec
-                return vec
-        except Exception as e:
-            if attempt == 2:
-                return []
-            time.sleep(2 ** attempt)
-    return []
+    vec = _embed_raw(text, prefix="query", retry=3)
+    if vec:
+        EMBED_CACHE[text] = vec
+    return vec
 
 
 def _search_qdrant(vec: list, payload_filter: dict | None, top_k: int) -> list:
@@ -537,6 +520,7 @@ def llm(prompt: str, max_tokens: int = 800) -> str:
             r.raise_for_status()
             text = r.json().get("response", "")
             if text:
+                time.sleep(3.0)   # [ЗАМЕЧАНИЕ] пауза между LLM-вызовами — снижает нагрев GPU
                 return clean(text)
         except Exception as e:
             if attempt == 2:
@@ -567,6 +551,42 @@ def _sanitize_retrieved_text(text: str) -> str:
         if not INJECTION_PATTERNS.match(line.strip())
     ]
     return "\n".join(clean_lines).strip()
+
+
+# [§2.2.5] Словарь замены ошибочных транслитераций и калек.
+# LLM (qwen2.5:14b) стабильно воспроизводит ряд псевдорусских конструкций,
+# возникших из буквального перевода английских терминов:
+#   semi-supervised → «семисери» вместо «полуконтролируемое обучение»
+#   unsupervised    → «безпосредственный» вместо «обучение без учителя»
+#   GRU             → «Гейш-рекуррентная» вместо «управляемый рекуррентный блок»
+# Применяется ко всем LLM-ответам в gen() как финальный постпроцессинг.
+_TERM_CORRECTIONS: list[tuple[str, str]] = [
+    # транслитерационные галлюцинации
+    (r"\bсемисери\b",               "полуконтролируемое обучение"),
+    (r"\bполусери\b",               "полуконтролируемое обучение"),
+    (r"\bбезпосредственн\w*",       "обучение без учителя"),
+    (r"\bГейш-рекуррентн\w*",       "управляемый рекуррентный блок"),
+    (r"\bГейш\s+рекуррентн\w*",     "управляемый рекуррентный блок"),
+    # калька «deep learning» → «глубокий обучение» (неверный род)
+    (r"\bглубокий\s+обучени[ея]\b", "глубокое обучение"),
+    # «машинный обучение» (неверный род)
+    (r"\bмашинный\s+обучени[ея]\b", "машинное обучение"),
+    # «supervised learning» → «надзорное обучение»
+    (r"\bнадзорное\s+обучени[ея]\b","обучение с учителем"),
+    # «unsupervised» → «ненадзорный»
+    (r"\bненадзорн\w+",             "без учителя"),
+]
+_TERM_RE: list[tuple[re.Pattern, str]] = [
+    (re.compile(pat, re.IGNORECASE), repl)
+    for pat, repl in _TERM_CORRECTIONS
+]
+
+
+def _apply_term_corrections(text: str) -> str:
+    """Применяет _TERM_RE к тексту LLM-ответа."""
+    for pattern, replacement in _TERM_RE:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 def gen(label: str, discipline: str, prompt: str,
@@ -602,7 +622,7 @@ def gen(label: str, discipline: str, prompt: str,
     # Добавляем явно, до **extra — чтобы extra мог при необходимости переопределить.
     fmt_vars = {"discipline": discipline, "direction": direction, "level": level, **extra}
     full_prompt = ctx_block + prompt.format(**fmt_vars) + f"\n\nСоздай для «{discipline}»:"
-    result = llm(full_prompt)
+    result = _apply_term_corrections(llm(full_prompt))
 
     # [C] Логируем для generation_log.json
     _generation_log[label] = {
@@ -1024,6 +1044,28 @@ def fill_doc_header(doc: Document, discipline: str, code: str,
 
         if txt == f"Уфа []":
             _set_para(para, f"Уфа {year}")
+            prev_txt = txt
+            continue
+
+        # [§6.1.5] ИСПРАВЛЕНО: шаблон содержит хардкод-даты «30.06.2022» и
+        # «Год приема 2022 г.» — fill_doc_header их не обновлял → документ
+        # содержал год 2022 при year=2025 в config.json.
+        # Паттерн DD.MM.YYYY заменяется на 30.06.{year} (дата утверждения РПД).
+        # «Год приема NNNN г.» заменяется на «Год приема {year} г.».
+        if re.search(r"\b\d{2}\.\d{2}\.\d{4}\b", txt):
+            new_txt = re.sub(r"\b(\d{2}\.\d{2}\.)\d{4}\b",
+                             lambda m: m.group(1) + str(year), para.text)
+            if new_txt != para.text:
+                _set_para(para, new_txt)
+            prev_txt = txt
+            continue
+
+        if re.search(r"Год\s+приема\s+\d{4}\s+г", txt, re.IGNORECASE):
+            new_txt = re.sub(r"(Год\s+приема\s+)\d{4}(\s+г)",
+                             lambda m: m.group(1) + str(year) + m.group(2),
+                             para.text, flags=re.IGNORECASE)
+            if new_txt != para.text:
+                _set_para(para, new_txt)
             prev_txt = txt
             continue
 
@@ -1728,6 +1770,56 @@ def parse_list(text: str, discipline: str = "", min_items: int = 3) -> list:
 # Библиография — генерация и заполнение таблиц
 # ---------------------------------------------------------------------------
 
+def _parse_rag_bibliography_chunks(hits: list) -> list:
+    """
+    [FIX-BIB-RAG] Прямой парсинг библиографических чанков из Qdrant.
+
+    Вместо передачи retrieved-текста в LLM как «примера» — извлекаем ГОСТ-строки
+    напрямую из payload["text"] каждого хита. Это исключает галлюцинации авторов
+    (Шарма, Петерс, Харрисон и т.д.), которые LLM генерировал по образцу чанков.
+
+    Признак ГОСТ-строки: содержит ' — ' и 4-значный год.
+    Тип записи («Основная» / «Дополнительная») определяется по контексту чанка.
+    """
+    entries = []
+    seen: set = set()
+    for h in hits:
+        text = h.get("payload", {}).get("text", "")
+        if not text:
+            continue
+        # Тип определяем по разделу, в котором встретилась запись
+        btype = (
+            "Дополнительная литература"
+            if "дополнительн" in text.lower()
+            else "Основная литература"
+        )
+        for line in text.splitlines():
+            line = line.strip()
+            # ГОСТ-строка: содержит год издания и хотя бы один разделитель.
+            # Корпус использует два варианта: " — " (ГОСТ-7.1) и " - " (дефис-замена).
+            # Проверяем оба — иначе записи вида "Кузнецов, И. Н. ... - Москва : ..., 2020."
+            # не распознаются и парсер возвращает пустой список несмотря на наличие чанков.
+            has_separator = (" — " in line) or (". -" in line) or (" : " in line and " - " in line)
+            if not has_separator or not re.search(r"\b\d{4}\b", line):
+                continue
+            # Убираем нумерацию "1. ", "2) " в начале строки
+            desc = re.sub(r"^\d+[\.\)]\s*", "", line).strip()
+            if len(desc) < 20:
+                continue
+            key = desc[:60].lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append({
+                "type":    btype,
+                "purpose": "Для изучения теории;Для выполнения СРО;",
+                "desc":    desc,
+                "url":     "http://bibl.rusoil.net",
+                "coeff":   "1.00",
+            })
+    return entries
+
+
 def parse_bibliography_json(text: str) -> list | None:
     """
     Парсит JSON-ответ LLM для библиографических записей.
@@ -1767,81 +1859,9 @@ def gen_bibliography(discipline: str, direction: str = "", level: str = "", cfg:
         dl = desc.lower()
         return any(m in dl for m in _PLACEHOLDER_MARKERS)
 
-    def _make_fallback_main() -> list:
-        """
-        [FIX-BIB-DISC] Fallback библиографии привязан к домену дисциплины.
-        Прежде всегда возвращались книги по МО/нейронным сетям независимо от дисциплины.
-        Теперь ключевые слова в названии выбирают подходящий набор учебников.
-        Этот путь срабатывает только если config.json не содержит main_bibliography
-        И LLM вернул галлюцинированные записи — в продакшене почти не используется.
-        """
-        _d = discipline.lower()
-        # --- Домены ---
-        if any(k in _d for k in ("интеллект", "нейрон", "machine", "deep", "обучен")):
-            # ИИ / машинное обучение / нейронные сети
-            return [
-                {"type": "Основная литература", "purpose": "Для изучения теории;",
-                 "desc": "Флах, П. Машинное обучение : наука и искусство построения алгоритмов / П. Флах. — Москва : ДМК Пресс, 2015. — 400 с.",
-                 "url": "http://www.znanium.com", "coeff": "1.00"},
-                {"type": "Основная литература", "purpose": "Для изучения теории;Для выполнения СРО;",
-                 "desc": "Рассел, С. Искусственный интеллект : современный подход / С. Рассел, П. Норвиг. — 4-е изд. — Москва : Вильямс, 2022. — 1408 с.",
-                 "url": "http://www.znanium.com", "coeff": "1.00"},
-                {"type": "Дополнительная литература", "purpose": "Для изучения теории;",
-                 "desc": "Осовский, С. Нейронные сети для обработки информации / С. Осовский. — Москва : Финансы и статистика, 2002. — 344 с.",
-                 "url": "http://biblio-online.ru", "coeff": "0.50"},
-            ]
-        elif any(k in _d for k in ("баз", "данн", "sql", "субд")):
-            # Базы данных
-            return [
-                {"type": "Основная литература", "purpose": "Для изучения теории;",
-                 "desc": "Дейт, К. Дж. Введение в системы баз данных / К. Дж. Дейт. — 8-е изд. — Москва : Вильямс, 2005. — 1328 с.",
-                 "url": "http://www.znanium.com", "coeff": "1.00"},
-                {"type": "Основная литература", "purpose": "Для изучения теории;Для выполнения СРО;",
-                 "desc": "Харинатх, С. Microsoft SQL Server 2012 : основы T-SQL / С. Харинатх, С. Куинн. — Москва : Эком, 2014. — 528 с.",
-                 "url": "http://e.lanbook.com", "coeff": "1.00"},
-                {"type": "Дополнительная литература", "purpose": "Для изучения теории;",
-                 "desc": "Малыхина, М. П. Базы данных : основы, проектирование, использование / М. П. Малыхина. — СПб. : БХВ-Петербург, 2007. — 512 с.",
-                 "url": "http://biblio-online.ru", "coeff": "0.50"},
-            ]
-        elif any(k in _d for k in ("сет", "телеком", "протокол", "tcp", "ip", "коммуник")):
-            # Компьютерные сети / телекоммуникации
-            return [
-                {"type": "Основная литература", "purpose": "Для изучения теории;",
-                 "desc": "Олифер, В. Г. Компьютерные сети : принципы, технологии, протоколы / В. Г. Олифер, Н. А. Олифер. — 5-е изд. — СПб. : Питер, 2016. — 992 с.",
-                 "url": "http://www.znanium.com", "coeff": "1.00"},
-                {"type": "Основная литература", "purpose": "Для изучения теории;Для выполнения СРО;",
-                 "desc": "Таненбаум, Э. Компьютерные сети / Э. Таненбаум, Д. Уэзеролл. — 5-е изд. — СПб. : Питер, 2012. — 960 с.",
-                 "url": "http://e.lanbook.com", "coeff": "1.00"},
-                {"type": "Дополнительная литература", "purpose": "Для изучения теории;",
-                 "desc": "Гук, М. Аппаратные средства локальных сетей / М. Гук. — СПб. : Питер, 2002. — 576 с.",
-                 "url": "http://biblio-online.ru", "coeff": "0.50"},
-            ]
-        elif any(k in _d for k in ("программ", "разработ", "web", "веб", "приложен")):
-            # Разработка ПО / веб
-            return [
-                {"type": "Основная литература", "purpose": "Для изучения теории;",
-                 "desc": "Фаулер, М. Архитектура корпоративных программных приложений / М. Фаулер. — Москва : Вильямс, 2012. — 544 с.",
-                 "url": "http://www.znanium.com", "coeff": "1.00"},
-                {"type": "Основная литература", "purpose": "Для изучения теории;Для выполнения СРО;",
-                 "desc": "Мартин, Р. Чистый код : создание, анализ и рефакторинг / Р. Мартин. — СПб. : Питер, 2019. — 464 с.",
-                 "url": "http://e.lanbook.com", "coeff": "1.00"},
-                {"type": "Дополнительная литература", "purpose": "Для изучения теории;",
-                 "desc": "Гамма, Э. Приёмы объектно-ориентированного проектирования : паттерны проектирования / Э. Гамма [и др.]. — СПб. : Питер, 2015. — 366 с.",
-                 "url": "http://biblio-online.ru", "coeff": "0.50"},
-            ]
-        else:
-            # Общий IT/CS — достаточно нейтральные книги
-            return [
-                {"type": "Основная литература", "purpose": "Для изучения теории;",
-                 "desc": "Кормен, Т. Алгоритмы : построение и анализ / Т. Кормен [и др.] ; пер. с англ. — 3-е изд. — Москва : Вильямс, 2013. — 1328 с.",
-                 "url": "http://www.znanium.com", "coeff": "1.00"},
-                {"type": "Основная литература", "purpose": "Для изучения теории;Для выполнения СРО;",
-                 "desc": "Дональд, Э. Кнут. Искусство программирования. Том 1 / Э. Кнут. — Москва : Вильямс, 2017. — 832 с.",
-                 "url": "http://e.lanbook.com", "coeff": "1.00"},
-                {"type": "Дополнительная литература", "purpose": "Для изучения теории;",
-                 "desc": "Таненбаум, Э. Архитектура компьютера / Э. Таненбаум, Т. Остин. — 6-е изд. — СПб. : Питер, 2013. — 816 с.",
-                 "url": "http://biblio-online.ru", "coeff": "0.50"},
-            ]
+    # [FIX-#14] _make_fallback_main() удалена: book_loader.py гарантирует
+    # наличие config.json["main_bibliography"] до запуска rpd_generate.py.
+    # Если ключ отсутствует — значит book_loader не был запущен: логируем явно.
 
     def _make_fallback_method(disc: str) -> list:
         """УГНТУ-пособия — всегда используем fallback (LLM не знает конкретных пособий кафедры)."""
@@ -1883,50 +1903,67 @@ def gen_bibliography(discipline: str, direction: str = "", level: str = "", cfg:
               f"{len(main_entries)} записей")
         _generation_log["bibliography_main_source"] = "config.json"
     else:
-        raw_main = gen(
-            "bibliography_main", discipline, PROMPTS["bibliography_main"],
-            direction=direction, level=level,
-        )
-        llm_entries = parse_bibliography_json(raw_main)
+        # [FIX-BIB-RAG] Путь 2: прямой парсинг RAG-чанков без вызова LLM.
+        # Если Qdrant вернул ≥2 ГОСТ-строки из чанков section_type="bibliography"
+        # или "place" — подставляем их напрямую в T15, не передавая в LLM.
+        # LLM-вызов остаётся только как fallback при пустом/скудном корпусе.
+        # Аналогично тому, как fgos_competencies берётся из config.json напрямую.
+        _rag_section_types = SECTION_TYPE_FILTER.get("bibliography_main", ["bibliography", "place"])
+        _, _bib_hits = retrieve("bibliography_main", discipline, _rag_section_types,
+                                direction=direction, level=level)
+        _rag_entries = _parse_rag_bibliography_chunks(_bib_hits)
+        if len(_rag_entries) >= 2:
+            main_entries = _rag_entries
+            print(f"    ✅ Библиография T15: из RAG-чанков напрямую, "
+                  f"{len(main_entries)} записей (LLM не вызывался)")
+            _generation_log["bibliography_main_source"] = "rag_direct"
+        else:
+            # Fallback: RAG не дал достаточно записей → LLM с фильтром галлюцинаций
+            if _rag_entries:
+                print(f"    ⚠️  RAG вернул только {len(_rag_entries)} записей — передаём в LLM")
+            raw_main = gen(
+                "bibliography_main", discipline, PROMPTS["bibliography_main"],
+                direction=direction, level=level,
+            )
+            llm_entries = parse_bibliography_json(raw_main)
 
-        # Отфильтровываем записи с плейсхолдерами / галлюцинированными авторами
-        if llm_entries:
-            clean_entries = [e for e in llm_entries if not _is_placeholder(e.get("desc", ""))]
-            if len(clean_entries) >= 1:
-                main_entries = list(clean_entries)
-                # [FIX-5] Если после дедупликации и фильтрации осталась < 2 записи,
-                # дополняем из fallback. Прежде при 1 записи документ содержал
-                # только 1 книгу — меньше минимально допустимого для РПД.
-                if len(main_entries) < 2:
-                    fb = _make_fallback_main()
-                    existing_keys = {
-                        re.sub(r"\s+", "", e.get("desc", ""))[:50].lower()
-                        for e in main_entries
-                    }
-                    for fb_entry in fb:
-                        fb_key = re.sub(r"\s+", "", fb_entry.get("desc", ""))[:50].lower()
-                        if fb_key not in existing_keys:
-                            main_entries.append(fb_entry)
-                            existing_keys.add(fb_key)
-                        if len(main_entries) >= 3:
-                            break
-                added = len(main_entries) - len(clean_entries)
-                suffix = f" + {added} из fallback" if added else ""
-                print(f"    ✅ Библиография T15: принято {len(clean_entries)} от LLM{suffix}")
-                _generation_log["bibliography_main_source"] = "llm"
+            # Отфильтровываем записи с плейсхолдерами / галлюцинированными авторами
+            if llm_entries:
+                clean_entries = [e for e in llm_entries if not _is_placeholder(e.get("desc", ""))]
+                if len(clean_entries) >= 1:
+                    main_entries = list(clean_entries)
+                    # [FIX-5] Если после фильтрации осталась < 2 записи — дополняем из fallback.
+                    if len(main_entries) < 2:
+                        fb = []
+                        print("    ⚠️  T15: <2 записей от LLM и нет config.main_bibliography — запустите book_loader.py")
+                        existing_keys = {
+                            re.sub(r"\s+", "", e.get("desc", ""))[:50].lower()
+                            for e in main_entries
+                        }
+                        for fb_entry in fb:
+                            fb_key = re.sub(r"\s+", "", fb_entry.get("desc", ""))[:50].lower()
+                            if fb_key not in existing_keys:
+                                main_entries.append(fb_entry)
+                                existing_keys.add(fb_key)
+                            if len(main_entries) >= 3:
+                                break
+                    added = len(main_entries) - len(clean_entries)
+                    suffix = f" + {added} из fallback" if added else ""
+                    print(f"    ✅ Библиография T15: принято {len(clean_entries)} от LLM{suffix}")
+                    _generation_log["bibliography_main_source"] = "llm"
+                else:
+                    _generation_log["bibliography_main_source"] = "fallback"
+                    _generation_log["bibliography_main_fallback_reason"] = (
+                        f"LLM вернул {len(llm_entries)} записей, "
+                        f"из них {len(clean_entries)} без плейсхолдеров (нужно ≥1)"
+                    )
+                    print(f"    ⚠️  Библиография T15: LLM вернул шаблонные записи — запустите book_loader.py")
+                    main_entries = []
             else:
                 _generation_log["bibliography_main_source"] = "fallback"
-                _generation_log["bibliography_main_fallback_reason"] = (
-                    f"LLM вернул {len(llm_entries)} записей, "
-                    f"из них {len(clean_entries)} без плейсхолдеров (нужно ≥1)"
-                )
-                print(f"    ⚠️  Библиография T15: LLM вернул шаблонные записи → fallback")
-                main_entries = _make_fallback_main()
-        else:
-            _generation_log["bibliography_main_source"] = "fallback"
-            _generation_log["bibliography_main_fallback_reason"] = "JSON не распарсился"
-            print(f"    ⚠️  Библиография T15: JSON не распарсился → fallback")
-            main_entries = _make_fallback_main()
+                _generation_log["bibliography_main_fallback_reason"] = "JSON не распарсился"
+                print(f"    ⚠️  Библиография T15: JSON не распарсился — запустите book_loader.py")
+                main_entries = []
 
     # ── Методические издания — config.json override или fallback ─────────
     # qwen2.5:3b стабильно копирует «Фамилия, И. О. Название» из любого промпта.
@@ -2670,10 +2707,9 @@ PROMPTS = {
 ]
 Ровно 3 объекта. Замени угловые скобки реальными ГОСТ-записями.""",
 
-    # bibliography_method: ключ оставлен для совместимости, не используется как промпт —
-    # методические издания всегда генерируются через fallback (qwen2.5:3b
-    # копирует шаблонные "Фамилия, И. О." вместо реальных УГНТУ-пособий).
-    "bibliography_method": "",
+    # [FIX-#13] bibliography_method удалён: ключ никогда не использовался как промпт.
+    # T17 всегда генерируется через fallback — LLM не знает реальных УГНТУ-пособий.
+    # [FIX-#14] T15 всегда берётся из config.main_bibliography (book_loader.py).
 
     "practice": """\
 Напиши 6 тем практических занятий для дисциплины «{discipline}».
