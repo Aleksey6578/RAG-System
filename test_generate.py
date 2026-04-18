@@ -80,8 +80,8 @@ RANKS = {
 }
 
 # Минимальное число вопросов
-MIN_PER_RANK    = 15   # [FIX-§15.5.1] поднят с 10 → 15; итого 45 на раздел
-MIN_PER_SECTION = 30
+MIN_PER_RANK    = 20   # [FIX-§15.5.1] поднят с 15 → 20 (синхронизация с RouterAI)
+MIN_PER_SECTION = 30   # [З-14] при MIN_PER_RANK=20 → 60 вопросов/раздел (3 ранга × 20)
 MIN_PER_COMP    = 100
 
 # Типы вопросов (поле в нумерации):
@@ -179,7 +179,7 @@ def retrieve_for_section(section_name: str, discipline: str,
         f"определения понятия {section_name}",
     ]
 
-    section_types = ["book_content", "content"]
+    section_types = ["book_content", "content", "lecture_content", "lab_content", "practice_content"]  # [З-11]
     # [FIX-SHOULD1] При одном section_type Qdrant отклоняет should-обёртку (HTTP 400).
     if len(section_types) == 1:
         payload_filter = {
@@ -825,7 +825,7 @@ def generate_questions_for_section(
                 context=ctx[:MAX_CONTEXT_CHARS],
                 n=shortage + 2,
             )
-            raw = llm(prompt, max_tokens=2000 if rank == 3 else 1400)  # [FIX-§15.5.2]
+            raw = llm(prompt, max_tokens=_max_tok)  # [З-12] унифицировано с _max_tok строки 799
             extra = _parse_questions_from_llm(
                 raw, rank=rank, section_num=sec_num,
                 topic_num=len(topics) + 1,

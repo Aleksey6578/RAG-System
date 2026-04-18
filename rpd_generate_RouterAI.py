@@ -739,7 +739,7 @@ def fill_annotation_table(
     comp_lines = []
     for comp_idx, (code, desc) in enumerate(competencies):
         comp_lines.append(f" {code} {desc}:")
-        _ind_text = _ann_z_texts[comp_idx % len(_ann_z_texts)][:60] if _ann_z_texts \
+        _ind_text = _ann_z_texts[comp_idx % len(_ann_z_texts)] if _ann_z_texts \
             else "Применяет методы и инструменты дисциплины"
         comp_lines.append(f"-{code}.1 Знает {_ind_text}")
     comp_text = "\n".join(comp_lines)

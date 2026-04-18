@@ -128,6 +128,9 @@ _ST_MAP: dict = {
     "competencies":      "competencies",
     "learning_outcomes": "outcomes",
     "content":           "content",
+    "lecture_content":   "content",      # [З-02] подтип лекционного контента
+    "lab_content":       "lab_works",    # [З-02] подтип лабораторных работ
+    "practice_content":  "practice",     # [З-02] подтип практических занятий
     "assessment":        None,            # [FIX-MAP] ФОС → не является эталоном
     "bibliography":      "bibliography",
     "place":             "bibliography",

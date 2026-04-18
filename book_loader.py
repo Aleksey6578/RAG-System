@@ -166,6 +166,7 @@ def chunk_text(text: str, source_file: str) -> list[dict]:
                 "id": f"{Path(source_file).stem}_chunk_{idx}",
                 "text": " ".join(buf),
                 "stype": "book_content",
+                "content_type": "book",  # [З-07] для индекса content_type: keyword в Qdrant
                 "source_file": source_file,
             })
             overlap_buf, overlap_tok = [], 0
@@ -184,6 +185,7 @@ def chunk_text(text: str, source_file: str) -> list[dict]:
             "id": f"{Path(source_file).stem}_chunk_{idx}",
             "text": " ".join(buf),
             "stype": "book_content",
+            "content_type": "book",  # [З-07]
             "source_file": source_file,
         })
     return chunks
@@ -271,6 +273,7 @@ def load_chunks_to_qdrant(all_chunks: list[dict]):
             "doc_position": 0,
             "text": chunk["text"],
             "section_type": chunk["stype"],
+            "content_type": chunk.get("content_type", "book"),  # [З-07]
             "metadata": {"section_type": chunk["stype"]},
             "direction": "",
             "level": "",

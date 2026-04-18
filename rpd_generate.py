@@ -84,7 +84,52 @@ OLLAMA = {
 }
 GENERATION = {"top_k": 8, "min_score": 0.45}
 
-# [З-2] Доменная фильтрация по direction/level актуальна при смешанном корпусе.
+# [З-13] CrossEncoder reranker — портирован из RouterAI-ветки.
+# Включается флагом --rerank при запуске: python rpd_generate.py config.json --rerank
+# Требует: pip install sentence-transformers
+# При недоступности модели прозрачно деградирует до cosine-only ranking.
+RERANK_ENABLED  = False          # переключается через args.rerank в main()
+RERANK_TOP_K    = 20             # первичный пул для cross-encoder
+_RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
+_reranker       = None           # None = не инициализирован; False = недоступен
+
+
+def _get_reranker():
+    """Lazy-init CrossEncoder. False = попытка была, модель недоступна."""
+    global _reranker
+    if _reranker is not None:
+        return _reranker
+    try:
+        from sentence_transformers import CrossEncoder  # noqa: PLC0415
+        _reranker = CrossEncoder(_RERANKER_MODEL, max_length=512)
+        print(f"  ✅ Reranker загружен: {_RERANKER_MODEL}")
+    except Exception as e:
+        print(f"  ⚠️  Reranker недоступен ({e}), cosine-only ranking")
+        _reranker = False
+    return _reranker
+
+
+def _rerank(query: str, hits: list, top_n: int) -> list:
+    """Cross-encoder reranking: hits (RERANK_TOP_K) → top_n. Fallback: hits[:top_n]."""
+    if not hits:
+        return hits
+    reranker = _get_reranker()
+    if not reranker:
+        return hits[:top_n]
+    texts = [h.get("payload", {}).get("text", "") or "" for h in hits]
+    pairs = [(query, t[:512]) for t in texts]
+    try:
+        scores = reranker.predict(pairs, show_progress_bar=False)
+        ranked  = sorted(zip(scores, hits), key=lambda x: x[0], reverse=True)
+        result  = [h for _, h in ranked[:top_n]]
+        print(f"      ↑ rerank: {len(hits)} → {len(result)} "
+              f"(best score: {max(scores):.3f})")
+        return result
+    except Exception as e:
+        print(f"  ⚠️  rerank ошибка: {e}, fallback cosine")
+        return hits[:top_n]
+
+
 # При однородном корпусе (все РПД одного направления/уровня) фильтр применяется
 # к 100% чанков — ничего не отсекает. Смысл появится при расширении корпуса
 # РПД других направлений или уровней подготовки (магистратура и т.п.).
@@ -102,17 +147,15 @@ MAX_CONTEXT_CHARS = 6000
 # Добавлен "bibliography" для секции bibliography_main — ранее поиск шёл без
 # фильтра по типу, что давало нерелевантные чанки с одинаковыми scores.
 SECTION_TYPE_FILTER = {
-    "competencies":     ["competencies", "learning_outcomes"],
-    "outcomes":         ["competencies", "learning_outcomes"],
-    "content":          ["content"],
-    # [FIX-STF] ИСПРАВЛЕНО: "assessment" убран из фильтров lab_works и practice.
-    # После [FIX-1б] в chunking.py тип "assessment" содержит только ФОС-бойлерплейт
-    # («не зачтено / зачтено», критерии оценки) — не имеет отношения к темам ЛР/ПЗ.
-    # Аналогичный вывод явно задокументирован в evaluate.py [FIX-MAP]: assessment → None.
-    # Включение assessment в retrieval давало нерелевантный контекст → LLM генерировал
-    # обобщённые темы вместо конкретных заданий из корпуса.
-    "lab_works":        ["content", "book_content"],
-    "practice":         ["content", "book_content"],
+    "competencies":      ["competencies", "learning_outcomes"],
+    "outcomes":          ["competencies", "learning_outcomes"],
+    "content":           ["content", "lecture_content"],
+    # [FIX-PRACTICE-STF] Добавлены подтипы lab_content / practice_content.
+    # converter.py создаёт эти типы для обеих веток (FIX-CONTENT-SUBTYPES),
+    # но local-версия не получила обновление фильтра → retrieval не видел
+    # чанки с lab_content/practice_content → BLEU practice ~0.02.
+    "lab_works":         ["content", "lab_content", "book_content"],
+    "practice":          ["content", "practice_content", "book_content"],
     "bibliography_main": ["bibliography", "place"],
 }
 
@@ -288,9 +331,10 @@ SECTION_QUERIES = {
         "{discipline} программа курса темы методы алгоритмы технологии практика",
     ],
     "lab_works": [
-        # [FIX-LR1] Имитируем формулировку реальной ЛР вместо описания раздела.
-        # Старые запросы попадали в шаблонную фразу ФОС (score=0.6408 у всех 8).
-        "{discipline} реализация алгоритма классификации обучение модели нейронная сеть",
+        # [З-08] Убрана нейросетевая специфика («нейронная сеть», «классификации»)
+        # — residual от «Интеллектуальных систем», давал нерелевантный retrieval
+        # для других дисциплин (Параллельные вычисления, ОИБ и т.д.).
+        "{discipline} задание разработка реализация алгоритма исследование",
         "{discipline} лабораторная работа задание исследование программирование Python",
     ],
     "practice": [
@@ -407,7 +451,8 @@ def retrieve(section: str, discipline: str, section_types: list = None,
             vec = get_embedding(query_text)
             if not vec:
                 continue
-            hits = _search_qdrant(vec, payload_filter, GENERATION["top_k"])
+            hits = _search_qdrant(vec, payload_filter,
+                                  RERANK_TOP_K if RERANK_ENABLED else GENERATION["top_k"])
             for h in hits:
                 hit_id = h.get("id")
                 if hit_id not in all_hits or h.get("score", 0) > all_hits[hit_id].get("score", 0):
@@ -430,7 +475,11 @@ def retrieve(section: str, discipline: str, section_types: list = None,
                 _source_counts[src] = _source_counts.get(src, 0) + 1
                 _diverse_all.append(h)
 
-        good_hits = _diverse_all[:GENERATION["top_k"]]
+        # [З-13] При --rerank: cross-encoder переранжирует расширенный пул → top_k
+        if RERANK_ENABLED and _diverse_all:
+            good_hits = _rerank(queries[0], _diverse_all, GENERATION["top_k"])
+        else:
+            good_hits = _diverse_all[:GENERATION["top_k"]]
 
         # [R] Fallback при пустом retrieval — снижаем порог и убираем фильтр
         if not good_hits:
@@ -761,7 +810,9 @@ def fill_annotation_table(
     comp_lines = []
     for comp_idx, (code, desc) in enumerate(competencies):
         comp_lines.append(f" {code} {desc}:")
-        _ind_text = _ann_z_texts[comp_idx % len(_ann_z_texts)][:60] if _ann_z_texts \
+        # [FIX-01-ANN] Синхронизировано с fill_outcomes_table FIX-01: убрана
+        # обрезка [:60] — индикатор аннотации не должен обрезаться на полуслове.
+        _ind_text = _ann_z_texts[comp_idx % len(_ann_z_texts)] if _ann_z_texts \
             else "Применяет методы и инструменты дисциплины"
         comp_lines.append(f"-{code}.1 Знает {_ind_text}")
     comp_text = "\n".join(comp_lines)
@@ -1166,6 +1217,24 @@ def fill_sro_topic_paragraphs(doc: Document, topics: list, label: str) -> None:
 
 
 
+def _to_research_topic(subtopic: str, idx: int) -> str:
+    """[FIX-10] Превращает название темы в исследовательский вопрос для доклада.
+    Без этой функции темы докладов дословно копировали названия лекций."""
+    base = subtopic.rstrip(".").strip()
+    if not base:
+        return subtopic
+    base_lc = base[0].lower() + base[1:] if len(base) > 1 else base.lower()
+    templates = [
+        f"Современное состояние и перспективы развития: {base_lc}",
+        f"Сравнительный анализ подходов к теме «{base}»",
+        f"Применение {base_lc} в прикладных задачах",
+        f"Актуальные проблемы и ограничения: {base_lc}",
+        f"Обзор методов и алгоритмов: {base_lc}",
+        f"{base}: практический обзор существующих решений",
+    ]
+    return templates[idx % len(templates)]
+
+
 # fill_doc_header пропускает [] после заголовков видов оценивания —
 # их заполняет эта функция на основе тематического плана дисциплины.
 def fill_appendix_v(doc: Document, discipline: str, topics: list) -> None:
@@ -1192,7 +1261,11 @@ def fill_appendix_v(doc: Document, discipline: str, topics: list) -> None:
         re.sub(r"^Тема\s+[\d.]+\s*", "", t).strip()
         for t in topics if re.match(r"^Тема\s+[\d.]", t)
     ][:6]
-    subtopics_list = "\n".join(f"- {s}" for s in subtopics) if subtopics else topics_list
+    # [FIX-10] Темы докладов — исследовательские вопросы, не дословные названия лекций.
+    subtopics_list = (
+        "\n".join(f"- {_to_research_topic(s, i)}" for i, s in enumerate(subtopics))
+        if subtopics else topics_list
+    )
 
     _TEMPLATES = {
         "реферат": (
@@ -1934,7 +2007,24 @@ def gen_bibliography(discipline: str, direction: str = "", level: str = "", cfg:
                     main_entries = list(clean_entries)
                     # [FIX-5] Если после фильтрации осталась < 2 записи — дополняем из fallback.
                     if len(main_entries) < 2:
-                        fb = []
+                        # [З-10] Minimal fallback: 2 реальных CS-учебника как последний резерв,
+                        # чтобы T15 не оставалась пустой при отсутствии book_loader.
+                        fb = [
+                            {
+                                "type": "Основная литература",
+                                "purpose": "Для изучения теории;",
+                                "desc": "Таненбаум Э., Бос Х. Современные операционные системы. — СПб. : Питер, 2015.",
+                                "url": "http://bibl.rusoil.net",
+                                "coeff": "1.00",
+                            },
+                            {
+                                "type": "Основная литература",
+                                "purpose": "Для изучения теории;",
+                                "desc": "Кормен Т. и др. Алгоритмы: построение и анализ. — М. : Вильямс, 2013.",
+                                "url": "http://bibl.rusoil.net",
+                                "coeff": "1.00",
+                            },
+                        ]
                         print("    ⚠️  T15: <2 записей от LLM и нет config.main_bibliography — запустите book_loader.py")
                         existing_keys = {
                             re.sub(r"\s+", "", e.get("desc", ""))[:50].lower()
@@ -1983,6 +2073,17 @@ def gen_bibliography(discipline: str, direction: str = "", level: str = "", cfg:
     return main_entries, method_entries
 
 
+def _normalize_gost_biblio(desc: str) -> str:
+    """[FIX-07] «Москва _ Вильямс» → «Москва : Вильямс» (ГОСТ Р 7.0.5-2008).
+    LLM иногда генерирует разделитель «_» или пробел вместо « : » между городом
+    и издательством — нормализуем перед записью в таблицу библиографии."""
+    if not desc:
+        return desc
+    s = re.sub(r"(?<=[A-Za-zА-Яа-яё»])\s*_\s*(?=[A-ZА-ЯЁ])", " : ", desc)
+    s = re.sub(r"(?<=[A-Za-zА-Яа-яё»])\s*:\s*(?=[A-ZА-ЯЁ])", " : ", s)
+    return re.sub(r" {2,}", " ", s).strip()
+
+
 def fill_bibliography_main(doc: Document, entries: list, semester: str):
     """Заполняет T15 основную и дополнительную литературу через fill_placeholder_rows."""
     table = find_table(doc, "bibliography")
@@ -2006,7 +2107,7 @@ def fill_bibliography_main(doc: Document, entries: list, semester: str):
             e.get("type",    "Основная литература"),
             e.get("purpose", "Для изучения теории;"),
             semester, "", "",           # очная / очно-заочная / заочная
-            e.get("desc",    ""),
+            _normalize_gost_biblio(e.get("desc", "")),   # [FIX-07] нормализация ГОСТ
             "1",                        # кол-во экз.
             e.get("url",     ""),
             e.get("coeff",   "1.00"),
@@ -2098,36 +2199,35 @@ def fill_outcomes_table(doc: Document, competencies: list, outcomes: list):
                     "в профессиональной практике"]
 
     rows = []
-    # [FIX-1] Глаголы для индикатора по типу результата обучения (ФГОС 3++).
-    # Было: f"{code}.{indicator_num} {desc[:100]}" — одинаковый текст для .1/.2/.3.
-    # Теперь .1 Знает / .2 Умеет применять / .3 Владеет навыками — три разных смысла.
-    _ind_verb = {"З": "Знает", "У": "Умеет применять", "В": "Владеет навыками"}
+    # [FIX-01] Убрана обрезка [:50] — индикатор без полуслова.
+    # [FIX-02] Сквозной счётчик _type_pos вместо idx%len: каждой паре
+    # (компетенция, тип) достаётся свой item; при исчерпании добавляется
+    # qualifier для уникальности. Прежний idx%len давал одинаковый rotated[0]
+    # при idx=0 и idx=3 (при len(items)<=3) → дублирующиеся индикаторы.
+    _ind_verbs = {"З": "знать", "У": "уметь", "В": "владеть"}
+    _type_pos  = {"З": 0, "У": 0, "В": 0}
+    _seen_texts: dict = {"З": set(), "У": set(), "В": set()}
     for idx, (code, desc) in enumerate(competencies):
         for type_idx, (otype, items, qualifiers) in enumerate([
             ("З", z_items, z_qualifiers),
             ("У", u_items, u_qualifiers),
             ("В", v_items, v_qualifiers),
         ]):
-            result_code = f"{otype}({code})"
+            result_code   = f"{otype}({code})"
             indicator_num = type_idx + 1
-            # [FIX-IND] Индикатор строится из outcome-текста, а не описания
-            # компетенции. Раньше _desc_clean был одинаков для З/У/В одной
-            # компетенции → все три индикатора имели одинаковый текст (.1=.2=.3).
-            # Теперь rotated вычисляется до indicator и используется в нём:
-            # УК-1.1 знать <текст З>, УК-1.2 уметь <текст У>, УК-1.3 владеть <текст В>.
-            rotated = items[idx % len(items):] + items[:idx % len(items)]
-            _ind_verbs = {"З": "знать", "У": "уметь", "В": "владеть"}
-            # [FIX-IND2] qualifier добавляется к indicator для уникальности.
-            # Без него idx=0 и idx=3 дают одинаковый rotated[0] при len(items)<=3.
-            _ind_qual = qualifiers[idx % len(qualifiers)]
-            indicator = f"{code}.{indicator_num} {_ind_verbs[otype]} {rotated[0][:50]} {_ind_qual}"
 
-            # [FIX-DUP] qualifiers применяются к result_text для уникальности.
-            # При outcomes_count=9 → 3 items на тип; idx=3%3=0 → дубль idx=0.
-            # qualifier имеет 5 элементов → при N≤5 компетенций нет повторов.
-            prefix = {"З": "Знать:", "У": "Уметь:", "В": "Владеть:"}[otype]
-            qual = qualifiers[idx % len(qualifiers)]
-            result_text = f"{prefix} {rotated[0]} {qual}"
+            base_item = items[_type_pos[otype] % len(items)]
+            qual      = qualifiers[_type_pos[otype] % len(qualifiers)]
+            _type_pos[otype] += 1
+
+            prefix      = {"З": "Знать:", "У": "Уметь:", "В": "Владеть:"}[otype]
+            result_text = f"{prefix} {base_item}"
+            if result_text in _seen_texts[otype]:
+                result_text = f"{prefix} {base_item} — {qual}"
+            _seen_texts[otype].add(result_text)
+
+            # [FIX-01] без [:50]
+            indicator = f"{code}.{indicator_num} {_ind_verbs[otype]} {base_item}"
 
             rows.append([code, indicator, result_code, result_text])
 
@@ -2412,7 +2512,7 @@ def fill_t6_workload(doc: Document, lec: int, pz: int, lr: int, sro: int,
                 break
 
 
-def fill_t11_sro(doc: Document, topics: list, sro: int):
+def fill_t11_sro(doc: Document, topics: list, sro: int, cfg: dict = None):
     table = find_table(doc, "sro")
     if table is None:
         return
@@ -2421,14 +2521,53 @@ def fill_t11_sro(doc: Document, topics: list, sro: int):
     n = max(len(sections), 1)
 
     hrs_study = round(sro * 0.20)
-    hrs_rgr   = round(sro * 0.20)
-    hrs_prep  = sro - hrs_study - hrs_rgr
+    hrs_main  = round(sro * 0.20)
+    hrs_prep  = sro - hrs_study - hrs_main
 
-    sro_types = [
-        ("подготовка к лабораторным и/или практическим занятиям", hrs_prep),
-        ("изучение учебного материала, вынесенного на СРО",       hrs_study),
-        ("выполнение расчётно-графической работы",                 hrs_rgr),
-    ]
+    # [FIX-06] Вид основной СРО берётся из config.json → sro_types (если задано),
+    # иначе подбирается эвристически по discipline_focus/discipline.
+    _cfg = cfg or {}
+    _custom_sro = _cfg.get("sro_types")
+    if _custom_sro and isinstance(_custom_sro, list) and len(_custom_sro) >= 1:
+        _custom_names = [str(x).strip() for x in _custom_sro if str(x).strip()]
+        if _custom_names:
+            per_item  = hrs_main // len(_custom_names)
+            remainder = hrs_main - per_item * len(_custom_names)
+            sro_types = [
+                ("подготовка к лабораторным и/или практическим занятиям", hrs_prep),
+                ("изучение учебного материала, вынесенного на СРО",       hrs_study),
+            ]
+            for i, name in enumerate(_custom_names):
+                hrs = per_item + (remainder if i == len(_custom_names) - 1 else 0)
+                sro_types.append((name, hrs))
+        else:
+            _custom_sro = None
+
+    if not (_custom_sro and isinstance(_custom_sro, list) and len(_custom_sro) >= 1):
+        _focus_raw = _cfg.get("discipline_focus", "")
+        _focus = (
+            " ".join(_focus_raw) if isinstance(_focus_raw, list) else str(_focus_raw)
+        ).lower()
+        _disc  = _cfg.get("discipline", "").lower()
+        _text  = f"{_disc} {_focus}"
+
+        if any(kw in _text for kw in (
+            "интеллектуальн", "нейрон", "машинн", "агент",
+            "проектирован", "разработк", "информационн",
+        )):
+            main_name = "выполнение индивидуального задания"
+        elif any(kw in _text for kw in (
+            "моделирован", "анализ данн", "исследован", "экспертн", "нечётк",
+        )):
+            main_name = "подготовка реферата"
+        else:
+            main_name = "выполнение расчётно-графической работы"
+
+        sro_types = [
+            ("подготовка к лабораторным и/или практическим занятиям", hrs_prep),
+            ("изучение учебного материала, вынесенного на СРО",       hrs_study),
+            (main_name,                                                hrs_main),
+        ]
     rows = []
     for sec_idx, sec in enumerate(sections):
         for stype, total_hrs in sro_types:
@@ -2478,17 +2617,15 @@ def fill_t21_fos(doc: Document, competencies: list, topics: list,
     # _desc_cut компетенции (которая начинается с «применять…») получалось
     # «ОПК-2.2 Умеет применять применять методы…» — двойной глагол.
     # Теперь verb="Умеет", indicator становится «ОПК-2.2 Умеет применять…».
-    _indicator_objects = {
-        "З": "основные методы и принципы в области «{sec}»",
-        "У": "методы дисциплины применительно к разделу «{sec}»",
-        "В": "навыками работы с инструментами в разделе «{sec}»",
-    }
+    # [З-09] _indicator_objects удалён — мёртвый код после FIX-03 (не используется).
 
     rows = []
     n = 1
     for sec in sections:
         sec_name  = re.sub(r"^Раздел\s*\d+\.\s*", "", sec)
-        sec_short = sec_name[:40]
+        # [FIX-04] Убрана жёсткая обрезка [:40] — полное название раздела в ФОС.
+        # Мягкая обрезка только для >80 символов (защита от сверхдлинных названий).
+        sec_short = sec_name if len(sec_name) <= 80 else sec_name[:77].rstrip() + "…"
         for comp_idx, (code, comp_desc) in enumerate(competencies):
             for type_idx, res_type in enumerate(("З", "У", "В")):
                 type_outcomes = outcomes_by_type[res_type]
@@ -2498,13 +2635,19 @@ def fill_t21_fos(doc: Document, competencies: list, topics: list,
                 )
                 indicator_num = type_idx + 1
                 verb      = _indicator_verbs[res_type]
-                # [Фикс №8] Индикатор строится из desc компетенции, не из шаблона секции.
-                # Прежде obj брался из _indicator_objects[res_type].format(sec=sec_short) —
-                # все компетенции одного раздела получали одинаковый obj («методы в разделе X»).
-                # Теперь берём первую значимую часть desc компетенции — индикатор уникален
-                # для каждой компетенции, как в реальных РПД кафедры ВТИК.
-                _desc_cut = re.sub(r"^Способен\s+", "", comp_desc, flags=re.IGNORECASE).split(",")[0].strip()[:60]
-                indicator = f"{code}.{indicator_num} {verb} {_desc_cut}"
+
+                # [FIX-03] Индикатор строится из outcome_text, а не из desc компетенции.
+                # Было: f"{verb} {_desc_cut}" где _desc_cut — глагольная фраза компетенции
+                # («применять методы»). При verb="Умеет" давало «Умеет применять применять».
+                # Стало: нормализуем outcome_text — убираем дублирующий префикс.
+                _oc_core = outcome_text.strip()
+                _oc_core = re.sub(r"^(?:З|У|В)\s*[:\-—]\s*", "", _oc_core)
+                _oc_core = re.sub(
+                    r"^(?:знать|знает|уметь|умеет|владеть|владеет)\s*[:\-—]?\s*",
+                    "", _oc_core, flags=re.IGNORECASE,
+                )
+                indicator = f"{code}.{indicator_num} {verb}: {_oc_core}"
+
                 pokazatel = (
                     f"{'Отвечает на вопросы' if res_type == 'З' else 'Выполняет задания' if res_type == 'У' else 'Демонстрирует навыки'} "
                     f"по теме «{sec_short}»"
@@ -3127,7 +3270,7 @@ def main(config_path: Optional[str] = None, clear_cache: bool = False):
         ("Т8 Лекции",              fill_lectures_table,      (doc, topics, hours)),
         ("Т9 ЛР",                  fill_lab_table,           (doc, lab_works, topics, hours["lab"])),
         ("Т10 ПЗ",                 fill_practice_table,      (doc, practices, topics, hours["practice"])),
-        ("Т11 СРО",                fill_t11_sro,             (doc, topics, hours["self"])),
+        ("Т11 СРО",                fill_t11_sro,             (doc, topics, hours["self"], cfg)),
         ("Т15 Основная лит-ра",    fill_bibliography_main,   (doc, bib_main,   semester)),
         ("Т17 Метод.издания",      fill_bibliography_method, (doc, bib_method, semester)),
         ("Т21 ФОС",                fill_t21_fos,             (doc, competencies, topics, outcomes, discipline)),
@@ -3161,5 +3304,11 @@ if __name__ == "__main__":
     _p.add_argument("config", nargs="?", default=None, help="Путь к config.json")
     _p.add_argument("--clear-cache", action="store_true",
                     help="Сбросить rpd_cache.json (нужно после пересборки корпуса)")
+    _p.add_argument("--rerank", action="store_true",
+                    help="[З-13] Включить CrossEncoder reranking (требует sentence-transformers)")
     _a = _p.parse_args()
+    if _a.rerank:
+        global RERANK_ENABLED
+        RERANK_ENABLED = True
+        print("  ℹ️  Reranking включён (--rerank)")
     main(_a.config, clear_cache=_a.clear_cache)

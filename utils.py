@@ -54,13 +54,17 @@ def classify_section(title: str) -> str:
     return "other"
 
 
-def get_embedding(text: str, prefix: str = "query", retry: int = 3) -> list[float]:
+def get_embedding(text: str, prefix: str = "query", retry: int = 3, use_prefix: bool = True) -> list[float]:
     """
     Единая функция эмбеддинга через Ollama /api/embed (≥0.6).
 
     prefix:
       'passage' — для индексируемых текстов (load_qdrant, book_loader)
       'query'   — для поисковых запросов    (rpd_generate, test_generate, evaluate)
+
+    use_prefix: [З-15] При смене embed-модели на модели без instruction-формата
+      (например multilingual-e5) передавать use_prefix=False — тогда prefix игнорируется.
+      Переключать через EMBED_MODEL в utils.py при необходимости.
 
     Возвращает пустой список при неудаче (не поднимает исключение),
     чтобы caller мог проверить `if not vec`.
@@ -70,12 +74,14 @@ def get_embedding(text: str, prefix: str = "query", retry: int = 3) -> list[floa
     if len(text) > MAX_EMBED_CHARS:
         text = text[:MAX_EMBED_CHARS]
 
+    input_text = f"{prefix}: {text}" if use_prefix else text  # [З-15]
+
     delay = 2.0
     for attempt in range(retry):
         try:
             r = requests.post(
                 OLLAMA_EMBED_URL,
-                json={"model": EMBED_MODEL, "input": f"{prefix}: {text}"},
+                json={"model": EMBED_MODEL, "input": input_text},
                 timeout=120,
             )
             r.raise_for_status()

@@ -122,6 +122,9 @@ _ST_MAP: dict = {
     "competencies":      "competencies",
     "learning_outcomes": "outcomes",
     "content":           "content",
+    "lecture_content":   "content",      # [З-01] подтип лекционного контента
+    "lab_content":       "lab_works",    # [З-01] подтип лабораторных работ
+    "practice_content":  "practice",     # [З-01] подтип практических занятий
     "assessment":        None,            # [FIX-MAP] ФОС → не является эталоном
     "bibliography":      "bibliography",
     "place":             "bibliography",
@@ -248,6 +251,26 @@ _INSTITUTION_KW = re.compile(
 _CODE_PREFIX = re.compile(r"^\s*\([А-ЯA-Z0-9\.\-]{2,12}\)\s*(.+)", re.IGNORECASE)
 
 
+def _normalize_title(title: str) -> str:
+    """
+    [FIX-TITLE-NORM] Нормализация reference_title — удаление табличного мусора.
+
+    Критическое исправление (отчёт §2.4): заголовки корпуса содержат мусор:
+    «2 | Извлечение знаний из нейронных сетей | 7 | 3 | 9 | 4 | 1».
+    Алгоритм: если ' | ' присутствует — берём самый длинный нечисловой фрагмент.
+    """
+    if not title:
+        return title
+    if " | " in title:
+        parts = [p.strip() for p in title.split("|")]
+        text_parts = [p for p in parts if p and not re.match(r"^\d+$", p) and len(p) > 3]
+        if text_parts:
+            title = max(text_parts, key=len)
+    title = re.sub(r"^\d+\s+", "", title.strip())
+    title = re.sub(r"\s+\d+$", "", title.strip())
+    return title.strip()
+
+
 def _extract_discipline_name(chunks: list) -> str:
     """
     Извлекает название дисциплины из чанков.
@@ -331,6 +354,7 @@ def load_corpus(jsonl_path: str) -> dict:
         # Без этого embedding search сравнивает "Интеллектуальные системы"
         # vs "rpd_11.docx" → бессмысленное сходство ~0.52 для всех.
         title = _extract_discipline_name(data["chunks"])
+        title = _normalize_title(title)  # [FIX-TITLE-NORM]
 
         sec_texts: dict = {k: [] for k in _SECTION_PREDICATES.keys()}
         all_texts: list = []

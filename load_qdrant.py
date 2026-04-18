@@ -96,6 +96,7 @@ def create_payload_indexes(collection: str) -> None:
     fields = [
         ("section_type",          "keyword"),  # [S] верхний уровень
         ("metadata.section_type", "keyword"),  # обратная совместимость
+        ("content_type",          "keyword"),  # [FIX-CT] для совместимости с book_loader RouterAI-версии
         ("source",                "keyword"),
         ("doc_id",                "keyword"),
         ("section_title",         "keyword"),
