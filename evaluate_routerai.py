@@ -30,9 +30,7 @@ from docx import Document                        # [FIX-PEP8] перенесён
 from nltk.stem.snowball import SnowballStemmer   # [FIX-ROUGE] для стемминга русских токенов
 from openai import OpenAI
 
-# [FIX-#9] Кэш эмбеддингов: evaluate.py вычислял 49×N эмбеддингов при каждом
-# запуске. Простой dict-кэш + персистенция в eval_cache.json — аналогично
-# rpd_cache.json в rpd_generate.py.
+# [FIX-#9]
 _EMBED_CACHE: dict = {}
 _EVAL_CACHE_FILE = "eval_cache.json"
 
@@ -62,10 +60,7 @@ def _save_eval_cache() -> None:
 from nltk.translate.bleu_score import SmoothingFunction, corpus_bleu
 from rouge_score import rouge_scorer as rs_lib
 
-# [FIX-ROUGE] Стеммер для предобработки русских токенов перед ROUGE-подсчётом.
-# use_stemmer=True в RougeScorer использует PorterStemmer (английский) — неприменим
-# для русского. Предобработка через SnowballStemmer('russian') снижает занижение
-# ROUGE на 10–20% (нейронных ≠ нейронные без стемминга).
+# [FIX-ROUGE]
 _ru_stemmer = SnowballStemmer("russian")
 
 
@@ -102,9 +97,7 @@ DEFAULT_OUT    = "eval_report.json"
 _SECTION_PREDICATES: dict = {
     "competencies": lambda h: any("Формируемые компетенции" in s for s in h),
     "outcomes":     lambda h: any("Индикаторы достижения компетенций" in s for s in h),
-    # [FIX-T8] Добавлен признак таблицы лекций (T8): в заголовке ячейки стоит
-    # «Лекция N. <тема>» вместо «Название темы (раздела)». Без этого T8 не
-    # захватывалась → content = 464 симв. вместо ~1500+ → ROUGE-1 занижен.
+    # [FIX-T8]
     "content":      lambda h: (
         any("Название темы (раздела)" in s for s in h) or
         any(re.search(r"Лекция\s+\d+\.", s) for s in h)
@@ -118,12 +111,7 @@ _SECTION_PREDICATES: dict = {
 }
 
 # Маппинг section_type из data_clean.jsonl → ключи _SECTION_PREDICATES.
-# [FIX-MAP] assessment → None: после исправления баг-А в converter.py темы ЛР
-# хранятся с section_type="content", а не "assessment". В "assessment" остался
-# только ФОС-бойлерплейт (критерии оценки, шкалы) — использовать его как эталон
-# для lab_works методологически некорректно: ROUGE сравнивал бы темы лабораторных
-# работ с текстами типа «не зачтено / зачтено», давая заниженный score.
-# Эталон для lab_works и practice теперь берётся из content-чанков (корректно).
+# [FIX-MAP]
 _ST_MAP: dict = {
     "competencies":      "competencies",
     "learning_outcomes": "outcomes",
@@ -174,7 +162,6 @@ def cosine_sim(a: list[float], b: list[float]) -> float:
 def _table_header_set(table, max_rows: int = 5) -> frozenset:
     """
     Frozenset уникальных текстов ячеек из первых max_rows строк.
-    [FIX-#10] max_rows поднят с 3 до 5 — синхронизировано с rpd_generate.py
     (_table_header_set там тоже max_rows=5). Расхождение давало разные
     результаты детекции таблиц при оценке vs генерации.
     """
@@ -194,7 +181,6 @@ def _table_all_text(table) -> str:
     """
     Весь текст таблицы без дублей merged-ячеек ВНУТРИ строки.
 
-    [FIX-TC] Глобальная дедупликация по id(cell._tc) была некорректна:
     в шаблонах УГНТУ некоторые _tc-элементы повторяются ЧЕРЕЗ строки
     (крестообразный мердж в T4 компетенций). При глобальном seen строки 1–5
     давали 0 новых ячеек → 70 симв. вместо ~400.
@@ -270,7 +256,6 @@ _CODE_PREFIX = re.compile(r"^\s*\([А-ЯA-Z0-9\.\-]{2,12}\)\s*(.+)", re.IGNORECA
 
 def _normalize_title(title: str) -> str:
     """
-    [FIX-TITLE-NORM] Нормализация reference_title — удаление табличного мусора.
 
     Критическое исправление (отчёт §2.4, рекомендация «Нормализовать reference_title»):
     Заголовки в корпусе содержат табличный мусор: «2 | Извлечение знаний из нейронных сетей | 7 | 3 | 9 | 4 | 1».
@@ -378,12 +363,9 @@ def load_corpus(jsonl_path: str) -> dict:
 
     corpus: dict = {}
     for src, data in raw.items():
-        # [FIX-TITLE] Извлекаем реальное название дисциплины из содержимого,
-        # а не из поля title (которое часто содержит имя файла: "rpd_11.docx").
-        # Без этого embedding search сравнивает "Интеллектуальные системы"
-        # vs "rpd_11.docx" → бессмысленное сходство ~0.52 для всех.
+        # [FIX-TITLE]
         title = _extract_discipline_name(data["chunks"])
-        # [FIX-TITLE-NORM] Нормализация: удаление табличного мусора из заголовков.
+        # [FIX-TITLE-NORM]
         title = _normalize_title(title)
 
         sec_texts: dict = {k: [] for k in _SECTION_PREDICATES.keys()}
@@ -397,10 +379,7 @@ def load_corpus(jsonl_path: str) -> dict:
             mapped = _ST_MAP.get(chunk.get("section_type", ""))
             if mapped:
                 sec_texts[mapped].append(text)
-                # [FIX-LAB] В корпусе темы ЛР и ПЗ хранятся под section_type="content"
-                # (после исправления баг-А в converter.py). Отдельного типа нет,
-                # поэтому sec_texts["lab_works"] и ["practice"] всегда были пустыми
-                # → empty_reference. Пробрасываем content-чанки в оба ключа.
+                # [FIX-LAB]
                 if mapped == "content":
                     sec_texts["lab_works"].append(text)
                     sec_texts["practice"].append(text)
@@ -452,11 +431,7 @@ def find_reference(
         except Exception as e:
             print(f"    ⚠️  {src}: {e}")
 
-    # [FIX-REF] Fallback когда title — название вуза, а не дисциплины.
-    # Признаки плохого title: содержит институциональные слова ИЛИ similarity < 0.55.
-    # Fallback: embed первых 300 симв. из секции competencies каждого источника.
-    # Компетенции содержат коды (УК-1, ОПК-1) и формулировки, специфичные
-    # для направления → дают осмысленное попарное сравнение.
+    # [FIX-REF]
     best_title = best_entry.get("title", "")
     if best_score < 0.55 or _INSTITUTION_KW.search(best_title):
         print(f"  ⚠️  title-поиск ненадёжен (score={best_score:.3f}, "
@@ -598,10 +573,19 @@ def compute_all_metrics(
                             "rougeL": 0.0, "note": "empty_reference"}
             continue
 
-        results[key] = {
+        row = {
             "bleu": compute_bleu(hyp, ref),
             **compute_rouge(hyp, ref),
         }
+        # [З-8/OI-10] Semantic similarity для ЛР/ПЗ — cosine между embedding
+        # сгенерированного и эталонного текста. BLEU/ROUGE занижены из-за
+        # перефразирования; semantic_sim ≥ 0.70 = тематика совпала.
+        if key in ("lab_works", "practice"):
+            hyp_vec = embed(hyp[:400])
+            ref_vec = embed(ref[:400])
+            if hyp_vec and ref_vec:
+                row["semantic_sim"] = round(cosine_sim(hyp_vec, ref_vec), 4)
+        results[key] = row
 
     # Overall — полный текст документа
     hyp_full = gen_sections.get("full", "").strip()
@@ -655,13 +639,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # [FIX-DOCX-AUTO] Авто-детект папки с оригинальными DOCX-файлами корпуса.
-    # Сравнение docx↔docx значительно точнее jsonl↔docx: при извлечении из jsonl
-    # таблицы (ЛР, ПЗ, библиография) теряют структуру и попадают в виде
-    # плоского чанк-текста, тогда как extract_doc_sections() читает ячейки
-    # напрямую → ROUGE для lab_works/practice/bibliography систематически
-    # занижен в jsonl-режиме на 5–15 пунктов.
-    # Если --ref-docx-dir не задан явно, проверяем rpd_corpus/ рядом со скриптом.
+    # [FIX-DOCX-AUTO]
     if args.ref_docx_dir is None:
         _auto_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rpd_corpus")
         if os.path.isdir(_auto_dir):
@@ -674,6 +652,11 @@ def main() -> None:
         with open(args.config, encoding="utf-8") as f:
             cfg = json.load(f)
         discipline = cfg.get("discipline", discipline)
+        # [FIX-З9] Принудительный эталон из config.json (поле reference_rpd),
+        # если --reference не передан явно через CLI.
+        if not args.reference and cfg.get("reference_rpd"):
+            args.reference = cfg["reference_rpd"]
+            print(f"  ℹ️  Эталон из config.json: {args.reference}")
 
     print(f"\n{'='*55}")
     print(f"  evaluate.py — оценка РПД")
@@ -781,24 +764,28 @@ def main() -> None:
     metrics = compute_all_metrics(gen_sections, ref_sections_raw, per_section_refs)
 
     # --- Вывод таблицы ---
-    col = "{:<20s} {:>7} {:>8} {:>8} {:>8}"
-    print(f"\n{'='*57}")
-    print(col.format("Секция", "BLEU", "ROUGE-1", "ROUGE-2", "ROUGE-L"))
-    print("-"*57)
+    col     = "{:<20s} {:>7} {:>8} {:>8} {:>8}"
+    col_sem = "{:<20s} {:>7} {:>8} {:>8} {:>8}  {:>10}"
+    print(f"\n{'='*70}")
+    print(col_sem.format("Секция", "BLEU", "ROUGE-1", "ROUGE-2", "ROUGE-L", "sem_sim"))
+    print("-"*70)
     for key in (*_SECTION_PREDICATES.keys(), "overall"):
         vals = metrics.get(key, {})
         note = vals.get("note", "")
         if note and "empty" in note:
-            print(f"  {key:<20s} {'—':>7} {'—':>8} {'—':>8}   ({note})")
+            print(f"  {key:<20s} {'—':>7} {'—':>8} {'—':>8} {'—':>8}   ({note})")
         else:
-            print(col.format(
+            sem = vals.get("semantic_sim")
+            sem_str = f"{sem:.4f}" if sem is not None else "—"
+            print(col_sem.format(
                 f"  {key}",
                 f"{vals.get('bleu',  0):.4f}",
                 f"{vals.get('rouge1',0):.4f}",
                 f"{vals.get('rouge2',0):.4f}",
                 f"{vals.get('rougeL',0):.4f}",
+                sem_str,
             ))
-    print("="*57)
+    print("="*70)
 
     # --- Интерпретация overall ---
     # Пороги скорректированы под RAG-генерацию:

@@ -31,38 +31,33 @@ except ImportError:
 
 BOOKS_DIR = Path("rpd_books")
 CONFIG_PATH = Path("config.json")
-# [FIX-SYNC] Синхронизировано с chunking.py (было 300/50 — расхождение ~25%)
+# [FIX-SYNC]
 CHUNK_TOKENS = 400
 OVERLAP_TOKENS = 60
 
 QDRANT_URL = "http://localhost:6333"
 COLLECTION = "rpd_rag"
 UPSERT_BATCH = 64
-RETRY_COUNT = 3
-RETRY_DELAY = 2.0
+RETRY_COUNT = 5
+RETRY_DELAY = 3.0
 
-# [FIX-SYNC] Токенайзер bge-m3 вместо len//4, аналогично chunking.py §13.2.
-# Fallback: transformers (bge-m3) → len×0.375 (≈ 1.5 слова/токен для русского).
-try:
-    from transformers import AutoTokenizer as _AutoTok
-    _tokenizer = _AutoTok.from_pretrained("BAAI/bge-m3", use_fast=True)
-    def _approx_tokens(text: str) -> int:
-        return len(_tokenizer.encode(text, add_special_tokens=False))
-except Exception:
-    _tokenizer = None
-    def _approx_tokens(text: str) -> int:  # type: ignore[misc]
-        return int(len(text) * 0.375)  # ~2.67 симв./токен для русского
+# [FIX-OI07] book_loader_routerai использует qwen3-embedding-4b для векторов,
+# но bge-m3 токенайзер давал другой счёт токенов (~15% расхождение).
+# Убираем transformers-блок — используем char-аппроксимацию для qwen3 BPE:
+# ~2.85 симв./токен на смешанном рус/англ тексте (эмпирически, qwen3 tokenizer).
+# Это согласовано с CHUNK_TOKENS=400 и load_qdrant_RouterAI.py.
+def _approx_tokens(text: str) -> int:
+    return int(len(text) * 0.35)
 
 def _get_embedding(text: str, prefix: str = "passage", retry: int = RETRY_COUNT) -> list:
     """
     Embedding через RouterAI API (qwen3-embedding-4b).
 
-    [FIX-NONE] Отчёт §3.2: защита от NoneType — response.data может быть
     пустым списком / None, тогда response.data[0].embedding падает с
     TypeError. Добавлена полная валидация ответа перед обращением к [0].
     Валидация входа: пустая строка не отправляется в API.
     """
-    # [FIX-NONE] Валидация входа
+    # [FIX-NONE]
     if not text or not text.strip():
         print(f"  ⚠️  _get_embedding: пустой текст — пропуск")
         return []
@@ -74,7 +69,7 @@ def _get_embedding(text: str, prefix: str = "passage", retry: int = RETRY_COUNT)
                 input=text,
                 encoding_format="float",
             )
-            # [FIX-NONE] Полная валидация ответа API
+            # [FIX-NONE]
             if response is None:
                 print(f"  ⚠️  embedding: response is None "
                       f"(попытка {attempt + 1}/{retry})")
@@ -166,9 +161,7 @@ def extract_text_pdf(path: Path) -> str:
     pages = [page.get_text() for page in doc]
     text = "\n".join(pages)
 
-    # [FIX-OCR] Если fitz вернул пустой текст — PDF сканированный (нет OCR-слоя).
-    # Fallback: растеризация страниц через PyMuPDF + pytesseract (rus).
-    # Хайкин «Нейронные сети» — сканированный PDF, без fallback = 0 чанков.
+    # [FIX-OCR]
     if not text.strip() and _OCR_AVAILABLE:
         print(f"  ⚠️  {path.name}: текстовый слой пуст — пробуем OCR (pytesseract)...")
         ocr_pages = []
@@ -218,6 +211,7 @@ def chunk_text(text: str, source_file: str) -> list[dict]:
                 "id": f"{Path(source_file).stem}_chunk_{idx}",
                 "text": " ".join(buf),
                 "stype": "book_content",
+                "content_type": "textbook",  # [FIX-TEXTBOOK] синхр. с book_loader.py
                 "source_file": source_file,
             })
             overlap_buf, overlap_tok = [], 0
@@ -236,6 +230,7 @@ def chunk_text(text: str, source_file: str) -> list[dict]:
             "id": f"{Path(source_file).stem}_chunk_{idx}",
             "text": " ".join(buf),
             "stype": "book_content",
+            "content_type": "textbook",  # [FIX-TEXTBOOK] синхр. с book_loader.py
             "source_file": source_file,
         })
     return chunks
@@ -302,8 +297,7 @@ def load_chunks_to_qdrant(all_chunks: list[dict]):
     print(f"  Загрузка {len(all_chunks)} книжных чанков в Qdrant (HTTP)...")
     time.sleep(5)
 
-    # [FIX-VALIDATE] Валидация текста перед embedding — проверка на пустоту и мин. длину.
-    # Устраняет NoneType ошибки при embedding (отчёт §5.2, рек. «Валидация текста»).
+    # [FIX-VALIDATE]
     MIN_EMBED_CHARS = 20
     validated_chunks = []
     skipped_validation = 0
@@ -324,14 +318,12 @@ def load_chunks_to_qdrant(all_chunks: list[dict]):
         if not vec:
             print(f"  ⚠️  Пропуск чанка {chunk['id']} — embedding не получен")
             continue
+        time.sleep(0.3)   # throttle между вызовами, предотвращает burst rate-limit
 
         # Числовой ID через SHA256
         point_id = int(hashlib.sha256(chunk["id"].encode()).hexdigest()[:15], 16)
 
-        # [FIX-TEXTBOOK] Маркировка type=textbook для книжных чанков (отчёт §5.3).
-        # Позволяет различать section_type=book_content (книги) и section_type контента РПД
-        # при retrieval с разными стратегиями. Поле "content_type" добавлено для
-        # тонкой фильтрации: type=textbook (книга) vs type=syllabus (РПД).
+        # [FIX-TEXTBOOK]
         payload = {
             "chunk_id": chunk["id"],
             "id": point_id,
@@ -352,7 +344,7 @@ def load_chunks_to_qdrant(all_chunks: list[dict]):
         }
         points.append({"id": point_id, "vector": vec, "payload": payload})
         if (i + 1) % 10 == 0:
-            print(f"    embedded {i+1}/{len(all_chunks)}")
+            print(f"    embedded {i+1}/{len(validated_chunks)}")
 
     if not points:
         print("  ⚠️  Нет точек для загрузки")

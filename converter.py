@@ -49,7 +49,7 @@ import json
 import re
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
-# [§3.2.1] Единая классификация разделов — вынесена в utils.py
+# [§3.2.1]
 from utils import classify_section
 
 RPD_CORPUS         = "rpd_corpus"
@@ -97,7 +97,7 @@ def _normalize_level(level_raw) -> int:
 
 
 def detect_section_type(section_title: Optional[str]) -> str:
-    """[§3.2.1] Делегирует в utils.classify_section — единая реализация."""
+    """Делегирует в utils.classify_section — единая реализация."""
     return classify_section(section_title or "")
 
 
@@ -109,7 +109,6 @@ def detect_section_type(section_title: Optional[str]) -> str:
 
 def _is_numeric_row(cells: list) -> bool:
     """
-    [З-C3] Проверяет, является ли строка «числовой шапкой» — артефактом
     объединённых ячеек в DOCX (строки вида «1 | 2 | 3 | 5 | 5 | 6 | 7»).
     Такие строки появляются как вторая строка в таблицах со сложной шапкой
     (например, «СВЕДЕНИЯ об обеспеченности»), где первая строка — реальные
@@ -140,9 +139,7 @@ def process_table(table: Table) -> Dict:
     if not raw_rows:
         return {"headers": [], "rows": []}
 
-    # [З-C3] ИСПРАВЛЕНО: первая строка — заголовки. Вторая строка отфильтровывается
-    # если она представляет собой числовую нумерацию столбцов (1|2|3|5|5|6|7|9).
-    # Такой артефакт типичен для таблиц с объединёнными ячейками в шапке.
+    # [З-C3]
     headers   = raw_rows[0]
     data_rows = raw_rows[1:]
     if data_rows and _is_numeric_row(data_rows[0]):
@@ -171,9 +168,7 @@ def extract_key_table_rows(
     document_id: str = "",
     section_level: int = 0,
 ) -> List[Dict]:
-    # [З-C2] ИСПРАВЛЕНО: добавлен тип "bibliography" — строки таблицы литературы
-    # (отдельная книга = отдельная строка) теперь извлекаются как отдельные
-    # table_row чанки вместо одного монолитного table-блока.
+    # [З-C2]
     if section_type not in ("competencies", "learning_outcomes", "content", "assessment",
                             "bibliography"):
         return []
@@ -183,13 +178,7 @@ def extract_key_table_rows(
     if not rows:
         return []
 
-    # [З-C4] ИСПРАВЛЕНО: заголовок таблицы добавляется только к первому чанку.
-    # Прежде header_line повторялся в КАЖДОЙ строке → 8 чанков content начинались
-    # с одинакового «№ пп. | Номер раздела | Название темы | Трудоемкость, часы».
-    # Это засоряло retrieval одинаковыми префиксами и снижало эффективность
-    # дедупликации по тексту в chunking.py.
-    # Новое поведение: первый чанк содержит «заголовок + строка», последующие —
-    # только строки данных, без повторного заголовка.
+    # [З-C4]
     header_line = " | ".join(str(h) for h in headers) if headers else ""
     blocks = []
     for idx, row_cells in enumerate(rows):
@@ -205,10 +194,7 @@ def extract_key_table_rows(
         effective_type = "learning_outcomes" if any(
             kw in row_lower for kw in ("знать:", "уметь:", "владеть:", "з(", "у(", "в(")
         ) else section_type
-        # [FIX-CONTENT-SUBTYPES] Подтипирование content → lecture_content/lab_content/practice_content.
-        # Корневая причина BLEU 0.02 для practice (отчёт §1.3, §7.6):
-        # classify_section() объединяет лекции, ЛР и ПЗ в один тип content.
-        # Теперь при section_type="content" определяем подтип по ключевым словам.
+        # [FIX-CONTENT-SUBTYPES]
         if effective_type == "content":
             if any(kw in row_lower for kw in ("лабораторн", "лр №", "лр.", "лаб. раб")):
                 effective_type = "lab_content"
@@ -230,7 +216,6 @@ def extract_key_table_rows(
 
 def _normalize_title(title: str) -> str:
     """
-    [FIX-TITLE-NORM] Нормализация title — удаление табличного мусора из заголовков.
     
     Критическое исправление (отчёт §2.4): title в корпусе содержит табличный мусор
     вида «2 | Извлечение знаний из нейронных сетей | 7 | 3 | 9 | 4 | 1»,
@@ -251,7 +236,7 @@ def _normalize_title(title: str) -> str:
 def extract_document_metadata(doc: Document) -> Dict:
     """[7] Метаданные документа — хранятся НА ВЕРХНЕМ УРОВНЕ JSON, не в чанке."""
     core = doc.core_properties
-    # [FIX-TITLE-NORM] Нормализация title для устранения табличного мусора
+    # [FIX-TITLE-NORM]
     raw_title = core.title or ""
     return {
         "title":            _normalize_title(raw_title),
@@ -350,11 +335,7 @@ def split_into_chunks(paragraphs: List[str], max_words: int = MAX_CHUNK_WORDS) -
         words = p.split()
         wc    = len(words)
         if wc > max_words:
-            # [БАГ 6 ИСПРАВЛЕНО]: если buffer не пустой — сначала сбрасываем его,
-            # затем обрабатываем большой абзац по предложениям.
-            # Раньше: if wc > max_words and not buffer — при непустом buffer
-            # огромный абзац добавлялся в buffer без разбивки → чанк мог быть
-            # в несколько раз больше max_words.
+            # [БАГ 6 ИСПРАВЛЕНО]
             if buffer:
                 chunks.append("\n\n".join(buffer))
                 buffer = []
@@ -419,9 +400,7 @@ def process_document(doc_path: Path) -> Dict:
         nonlocal buffer
         for chunk in split_into_chunks(buffer):
             if len(chunk.split()) >= MIN_CHUNK_WORDS:
-                # [FIX-CONTENT-SUBTYPES] Подтипирование текстовых блоков content.
-                # Аналогично extract_key_table_rows: при current_stype="content"
-                # определяем подтип по ключевым словам заголовка раздела.
+                # [FIX-CONTENT-SUBTYPES]
                 effective_stype = current_stype
                 if effective_stype == "content" and current_section:
                     sec_lower = current_section.lower()
@@ -464,8 +443,7 @@ def process_document(doc_path: Path) -> Dict:
                 buffer.append(text)
 
         elif item_type == "table":
-            # [БАГ 8 ИСПРАВЛЕНО]: убрано условие `and current_section`.
-            # Таблицы до первого заголовка (титульная страница РПД) больше не теряются.
+            # [БАГ 8 ИСПРАВЛЕНО]
             if buffer:
                 flush_buffer()
             _sec = current_section or "Введение"

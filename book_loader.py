@@ -20,7 +20,7 @@ except ImportError:
 
 BOOKS_DIR = Path("rpd_books")
 CONFIG_PATH = Path("config.json")
-# [FIX-SYNC] Синхронизировано с chunking.py (было 300/50 — расхождение ~25%)
+# [FIX-SYNC]
 CHUNK_TOKENS = 400
 OVERLAP_TOKENS = 60
 
@@ -30,8 +30,7 @@ UPSERT_BATCH = 64
 RETRY_COUNT = 3
 RETRY_DELAY = 2.0
 
-# [FIX-SYNC] Токенайзер bge-m3 вместо len//4, аналогично chunking.py §13.2.
-# Fallback: transformers (bge-m3) → len×0.375 (≈ 1.5 слова/токен для русского).
+# [FIX-SYNC]
 try:
     from transformers import AutoTokenizer as _AutoTok
     _tokenizer = _AutoTok.from_pretrained("BAAI/bge-m3", use_fast=True)
@@ -114,9 +113,7 @@ def extract_text_pdf(path: Path) -> str:
     pages = [page.get_text() for page in doc]
     text = "\n".join(pages)
 
-    # [FIX-OCR] Если fitz вернул пустой текст — PDF сканированный (нет OCR-слоя).
-    # Fallback: растеризация страниц через PyMuPDF + pytesseract (rus).
-    # Хайкин «Нейронные сети» — сканированный PDF, без fallback = 0 чанков.
+    # [FIX-OCR]
     if not text.strip() and _OCR_AVAILABLE:
         print(f"  ⚠️  {path.name}: текстовый слой пуст — пробуем OCR (pytesseract)...")
         ocr_pages = []
@@ -166,7 +163,7 @@ def chunk_text(text: str, source_file: str) -> list[dict]:
                 "id": f"{Path(source_file).stem}_chunk_{idx}",
                 "text": " ".join(buf),
                 "stype": "book_content",
-                "content_type": "book",  # [З-07] для индекса content_type: keyword в Qdrant
+                "content_type": "textbook",  # [FIX-TEXTBOOK] маркировка книжных чанков (синхр. с RouterAI)
                 "source_file": source_file,
             })
             overlap_buf, overlap_tok = [], 0
@@ -185,7 +182,7 @@ def chunk_text(text: str, source_file: str) -> list[dict]:
             "id": f"{Path(source_file).stem}_chunk_{idx}",
             "text": " ".join(buf),
             "stype": "book_content",
-            "content_type": "book",  # [З-07]
+            "content_type": "textbook",  # [FIX-TEXTBOOK]
             "source_file": source_file,
         })
     return chunks
@@ -252,8 +249,23 @@ def load_chunks_to_qdrant(all_chunks: list[dict]):
     print(f"  Загрузка {len(all_chunks)} книжных чанков в Qdrant (HTTP)...")
     time.sleep(5)
 
+    # [FIX-VALIDATE]
+    MIN_EMBED_CHARS = 20
+    validated_chunks = []
+    skipped_validation = 0
+    for chunk in all_chunks:
+        text = (chunk.get("text") or "").strip()
+        if not text or len(text) < MIN_EMBED_CHARS:
+            skipped_validation += 1
+            print(f"  ⚠️  Пропуск чанка {chunk['id']} — текст пуст или слишком короткий ({len(text)} симв.)")
+            continue
+        chunk["text"] = text
+        validated_chunks.append(chunk)
+    if skipped_validation:
+        print(f"  ℹ️  Пропущено при валидации: {skipped_validation} чанков")
+
     points = []
-    for i, chunk in enumerate(all_chunks):
+    for i, chunk in enumerate(validated_chunks):
         vec = _get_embedding(chunk["text"], prefix="passage", retry=RETRY_COUNT)
         if not vec:
             print(f"  ⚠️  Пропуск чанка {chunk['id']} — embedding не получен")
@@ -273,8 +285,8 @@ def load_chunks_to_qdrant(all_chunks: list[dict]):
             "doc_position": 0,
             "text": chunk["text"],
             "section_type": chunk["stype"],
-            "content_type": chunk.get("content_type", "book"),  # [З-07]
-            "metadata": {"section_type": chunk["stype"]},
+            "content_type": "textbook",  # [FIX-TEXTBOOK] синхр. с RouterAI
+            "metadata": {"section_type": chunk["stype"], "content_type": "textbook"},
             "direction": "",
             "level": "",
             "department": "",
@@ -282,7 +294,7 @@ def load_chunks_to_qdrant(all_chunks: list[dict]):
         }
         points.append({"id": point_id, "vector": vec, "payload": payload})
         if (i + 1) % 10 == 0:
-            print(f"    embedded {i+1}/{len(all_chunks)}")
+            print(f"    embedded {i+1}/{len(validated_chunks)}")
 
     if not points:
         print("  ⚠️  Нет точек для загрузки")

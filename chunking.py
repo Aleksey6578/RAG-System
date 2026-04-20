@@ -57,9 +57,14 @@ import json
 import hashlib
 import os
 import re
+import warnings
+# [FIX-З14]
+warnings.filterwarnings("ignore", message=".*PyTorch.*not found.*", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*torch.*", category=UserWarning)
+# HuggingFace tokenizers параллелизм — отключаем, чтобы не было dead-lock в Windows.
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 from collections import Counter
-# [§3.2.1] classify_section вынесена в utils.py — единая реализация для
-# converter.py и chunking.py устраняет риск рассинхронизации при правке ключевых слов.
+# [§3.2.1]
 from utils import classify_section
 
 INPUT_FILE  = "data_clean.jsonl"
@@ -108,6 +113,14 @@ except Exception:
         MAX_TOKENS   = 450
         OVERLAP_TOKENS = 75
         MIN_TOKENS   = 45
+        # [FIX-OI02] Явное предупреждение: без transformers границы чанков ±10–25%
+        import sys as _sys
+        print(
+            "  ⚠️  [OI-02] transformers не установлены — использую слова×1.5, MAX_TOKENS=450.\n"
+            "  Для точного подсчёта токенов bge-m3: pip install transformers\n"
+            "  После установки MAX_TOKENS вернётся к 400.",
+            file=_sys.stderr,
+        )
 
 # [5] ИСПРАВЛЕНО: удалены алиасы MAX_WORDS / OVERLAP / MIN_WORDS.
 # Это были зеркальные константы для MAX_TOKENS / OVERLAP_TOKENS / MIN_TOKENS,
@@ -115,19 +128,10 @@ except Exception:
 # напрямую (весь код обращается к *_TOKENS). Их присутствие создавало путаницу
 # при чтении и риск рассинхронизации при изменении порогов.
 
-# [FIX-#11] Повышен с 25→50 ранее; [З-K3] поднят до 100.
-# АУДИТ #11: assessment занимает 43% коллекции (1470 чанков) — ФОС-бойлерплейт.
-# Решение без изменения кода: добавить в config.json:
-#   "max_chunks_per_type": {"assessment": 10}
-# Это снизит долю assessment до ~15% без затрагивания content/learning_outcomes.
-# Код ниже уже поддерживает этот override через ключ max_chunks_per_type.
+# [FIX-#11]
 MAX_CHUNKS_PER_SECTION_TYPE = 100
 
-# [FIX-TITLE] Лимит «заголовочных» чанков для типа assessment на пару (source, type).
-# Заголовочный чанк — запись с section_level > 0 и коротким текстом (< MIN_TOKENS*2),
-# т.е. по сути просто строка-заголовок раздела ФОС без содержания.
-# При 16+ РПД в корпусе такие чанки давали 62% коллекции (assessment).
-# Лимит 5 снижает долю до ~37%, не затрагивая содержательные чанки ФОС.
+# [FIX-TITLE]
 MAX_TITLE_CHUNKS = 5
 
 NOISE_TITLES = {
@@ -135,14 +139,8 @@ NOISE_TITLES = {
     "РАБОЧАЯ ПРОГРАММА ДИСЦИПЛИНЫ",
     "рабочая программа дисциплины",
 }
-# [БАГ 3 ИСПРАВЛЕНО]: нормализованный набор для регистронезависимого сравнения.
-# "Рабочая программа дисциплины" (Title Case) не совпадало ни с UPPER ни с lower.
-# [З-C1] ИСПРАВЛЕНО: "СВЕДЕНИЯ" удалено из NOISE_TITLES.
-# Раньше section_title="СВЕДЕНИЯ" (заголовок раздела обеспеченности литературой)
-# точно совпадал с "сведения" в NOISE_TITLES_LOWER → все чанки из этого раздела
-# пропускались в chunking.py, даже после исправления SECTION_TYPE_MAP в converter.py.
-# Удаление из NOISE_TITLES позволяет чанкам с section_type="bibliography" пройти
-# в chunks.jsonl и далее в Qdrant.
+# [БАГ 3 ИСПРАВЛЕНО]
+# [З-C1]
 NOISE_TITLES_LOWER = {t.lower() for t in NOISE_TITLES}
 
 
@@ -164,10 +162,7 @@ def build_metadata(text: str, section_title: str, source: str,
         INCOMPATIBLE = {
             ("learning_outcomes", "accessibility"),
             ("learning_outcomes", "hours"),
-            # [FIX-1в] ("learning_outcomes", "assessment") убрана:
-            # block_stype из конвертера надёжнее title_stype. Пара срабатывала
-            # когда заголовок содержал "самостоятельн" (широкий regex) →
-            # корректные LO-записи хранились как assessment, раздувая его долю.
+            # [FIX-1в]
             ("competencies",      "accessibility"),
         }
         stype = title_stype if (block_stype, title_stype) in INCOMPATIBLE else block_stype
@@ -205,7 +200,6 @@ def extract_metadata(text: str, section_title: str, block_stype: str = None) -> 
 
 def text_hash(text: str, source: str = "", stype: str = "") -> str:
     """
-    [З-R4] Для структурно-шаблонных типов (place, hours) хеш считается
     без учёта source: одинаковый текст из разных РПД схлопывается в один
     чанк и не создаёт шум в retrieval.
 
@@ -314,9 +308,7 @@ def smart_split(text: str,
                 if count_tokens(chunk_text) >= MIN_TOKENS:
                     chunks.append(chunk_text)
                 # Сдвигаем на (max_tokens - overlap) токенов вперёд.
-                # [БАГ 4 ИСПРАВЛЕНО]: overlap_words считал слово, вызвавшее break,
-                # как НЕ посчитанное (overlap_words += 1 стоит ПОСЛЕ break).
-                # Теперь инкрементируем ДО проверки условия — overlap точный.
+                # [БАГ 4 ИСПРАВЛЕНО]
                 overlap_words = 0
                 overlap_tc = 0
                 for w in reversed(words[start: end]):
@@ -325,13 +317,8 @@ def smart_split(text: str,
                     if overlap_tc >= overlap:
                         break
                 start = max(start + 1, end - 1 - overlap_words)
-            # [БАГ 10 ИСПРАВЛЕНО]: после sliding window выполнялся continue —
-            # параграф не попадал в current, и следующий нормальный параграф
-            # начинался без overlap, разрывая контекстную связность.
-            # Теперь сохраняем хвост последнего чанка как seed для overlap.
-            # [З-K4] ИСПРАВЛЕНО: хвост ограничивается overlap токенами (не overlap*2
-            # словами), чтобы текущий current не превысил max_tokens при следующем
-            # добавлении нормального параграфа без flush().
+            # [БАГ 10 ИСПРАВЛЕНО]
+            # [З-K4]
             if chunks:
                 tail_words = chunks[-1].split()
                 # Набираем слова с конца до достижения overlap токенов
@@ -355,6 +342,9 @@ def smart_split(text: str,
 
         if current_size + tc > max_tokens and current:
             flush(keep_overlap=True)
+            # [FIX-З4]
+            if current_size + tc > max_tokens:
+                current, current_tcs, current_size = [], [], 0
 
         current.append(para)
         current_tcs.append(tc)
@@ -374,7 +364,6 @@ def group_short_chunks(records: list, max_group_tokens: int = 200) -> list:
     """
     Группировка коротких записей перед нарезкой на чанки.
 
-    [З-1 ИСПРАВЛЕНО]: добавлен тип "competencies" в GROUPABLE.
 
     [D-1/B-1] ИСПРАВЛЕНО: добавлен тип "learning_outcomes" в GROUPABLE.
     После исправления З-C4 (заголовок таблицы только у первого чанка)
@@ -415,9 +404,7 @@ def group_short_chunks(records: list, max_group_tokens: int = 200) -> list:
             merged = dict(r)
             merged["text"]            = group_text
             merged["word_count"]      = len(group_text.split())
-            # [FIX] Используем count_tokens() вместо word_count * 1.5.
-            # После слияния нескольких чанков оценка через * 1.5 давала
-            # занижение ~15–25% для русского текста (реальное — ~1.7–1.9 т/слово).
+            # [FIX]
             merged["token_count_est"] = count_tokens(group_text)
             result.append(merged)
             i = j
@@ -431,15 +418,10 @@ def main():
     print(f"Режим подсчёта: {_COUNT_MODE}")
     print(f"MAX_TOKENS={MAX_TOKENS}, OVERLAP={OVERLAP_TOKENS}, MIN_TOKENS={MIN_TOKENS}\n")
 
-    # [З-3] Читаем лимит чанков на (источник, тип) из config.json.
-    # Ключ: "max_chunks_per_section_type". Если не задан — используется константа.
+    # [З-3]
     chunks_limit = MAX_CHUNKS_PER_SECTION_TYPE
-    # [FIX-1а] Раздельные лимиты по типам через ключ "max_chunks_per_type".
-    # Позволяет снизить assessment до 20 не затрагивая content/learning_outcomes.
-    # [FIX-LIMITS] ИСПРАВЛЕНО (отчёт §3.2): дефолтные лимиты assessment=20,
-    # accessibility=10 вместо прежних 12 и 5. Жёсткие лимиты обрезали корпус
-    # ДО этапа retrieval, теряя ~500 чанков. Новые дефолты применяются если
-    # config.json не задаёт "max_chunks_per_type" явно.
+    # [FIX-1а]
+    # [FIX-LIMITS]
     type_limits: dict = {
         "assessment":    20,   # было 12 → теряло ~660 блоков
         "accessibility": 10,   # было 5 → теряло ~310 блоков
@@ -454,7 +436,7 @@ def main():
                 print(f"config.json: max_chunks_per_section_type={chunks_limit} (переопределено)")
             _tl = _cfg.get("max_chunks_per_type")
             if _tl and isinstance(_tl, dict):
-                # [FIX-LIMITS] Merge: config.json переопределяет дефолты, но не стирает их
+                # [FIX-LIMITS]
                 type_limits.update({k: int(v) for k, v in _tl.items()})
                 print(f"config.json: max_chunks_per_type={type_limits} (переопределено)")
         except Exception as _e:
@@ -504,10 +486,10 @@ def main():
         )
 
         stype_count   = stats_source[source]["by_stype"].get(stype_for_limit, 0)
-        # [FIX-1а] Эффективный лимит: per-type из config.json или глобальный.
+        # [FIX-1а]
         effective_limit = type_limits.get(stype_for_limit, chunks_limit)
         if stype_count >= effective_limit:
-            # [FIX-3] Агрегируем пропуски — выводим сводку в конце, не спамим
+            # [FIX-3]
             skip_key = (source, stype_for_limit)
             skip_counts[skip_key] = skip_counts.get(skip_key, 0) + 1
             continue
@@ -529,9 +511,7 @@ def main():
             if count_tokens(clean_chunk) < MIN_TOKENS:
                 continue
 
-            # [FIX-TITLE] Ограничиваем заголовочные чанки assessment до MAX_TITLE_CHUNKS.
-            # Заголовочный чанк: stype == assessment AND section_level > 0 AND
-            # текст короткий (< MIN_TOKENS*2) — т.е. только строка-заголовок раздела ФОС.
+            # [FIX-TITLE]
             _is_title_chunk = (
                 stype_for_limit == "assessment"
                 and section_level > 0
@@ -578,7 +558,7 @@ def main():
             if stype_count >= effective_limit:
                 break
 
-    # [FIX-3] Сводка пропущенных блоков — вместо построчного спама
+    # [FIX-3]
     if skip_counts:
         print("  Пропущено блоков по лимиту (source, тип → кол-во):")
         for (src, stp), cnt in sorted(skip_counts.items()):

@@ -93,9 +93,7 @@ RANKS = {
 }
 
 # Минимальное число вопросов
-# [FIX-§6.2] ИСПРАВЛЕНО (отчёт §6.2): поднят с 15 до 20.
-# ОПК-1 (86) и УК-1 (87) не достигали порога 100 вопросов.
-# 20 × 3 ранга × 3 раздела = 180 вопросов/компетенцию при полном покрытии.
+# [FIX-§6.2]
 MIN_PER_RANK    = 20
 MIN_PER_SECTION = 30
 MIN_PER_COMP    = 100
@@ -206,8 +204,8 @@ def retrieve_for_section(section_name: str, discipline: str,
         f"определения понятия {section_name}",
     ]
 
-    section_types = ["book_content", "content"]
-    # [FIX-SHOULD1] При одном section_type Qdrant отклоняет should-обёртку (HTTP 400).
+    section_types = ["book_content", "content", "lecture_content", "lab_content", "practice_content"]  # [FIX-STF] синхронизировано с local-версией
+    # [FIX-SHOULD1]
     if len(section_types) == 1:
         payload_filter = {
             "must": [{"key": "section_type", "match": {"value": section_types[0]}}]
@@ -247,11 +245,11 @@ def retrieve_for_section(section_name: str, discipline: str,
         if len(good_hits) >= GENERATION["top_k"]:
             break
 
-    # Если ничего не нашли — fallback без фильтра
+    # [FIX-З1]
     if not good_hits:
         vec = get_embedding(queries[0])
         if vec:
-            hits = _search_qdrant(vec, None, GENERATION["top_k"])
+            hits = _search_qdrant(vec, payload_filter, GENERATION["top_k"])
             good_hits = sorted(
                 [h for h in hits if h.get("score", 0) >= GENERATION["min_score"] * 0.7],
                 key=lambda h: h.get("score", 0), reverse=True
@@ -315,9 +313,7 @@ def llm(prompt: str, max_tokens: int = 1200) -> str:
 
 def _build_default_section_comp(n_sections: int) -> dict[int, list[str]]:
     """
-    [FIX-#6] Строит маппинг раздел→компетенции из config.json вместо
     захардкоженного словаря под конкретную дисциплину.
-    [FIX-§6.1.4] Читает section_competency_matrix если задана — устраняет
     дисбаланс (Раздел 1: 5 компетенций vs. Разделы 2–3: 2), который приводил
     к ПК-2/УК-1 < 100 вопросов. При отсутствии матрицы равномерно распределяет
     все компетенции по всем разделам (прежнее поведение).
@@ -328,7 +324,7 @@ def _build_default_section_comp(n_sections: int) -> dict[int, list[str]]:
         codes = [c.strip() for c in codes_raw.split(",") if c.strip()]
         if not codes:
             codes = list(cfg.get("fgos_competencies", {}).keys())
-        # [FIX-§6.1.4] Матрица раздел→компетенции из config.json
+        # [FIX-§6.1.4]
         matrix = cfg.get("section_competency_matrix")
         if matrix:
             result = {}
@@ -347,10 +343,8 @@ def parse_rpd_sections(rpd_path: Path) -> list[dict]:
     """
     Извлекает разделы дисциплины из output_rpd.docx.
 
-    [FIX-#5] Добавлен стоп-список ФОС-строк: строки «форм», «контрол»,
     «аттестац», «перечень оценочных», «промежуточн», «текущ» — не являются
     темами дисциплины и фильтруются. Добавлен cap topics[:6].
-    [FIX-#6] Дефолтный маппинг компетенций строится из config.json, а не
     из захардкоженного _DEFAULT_SECTION_COMP.
     """
     doc = Document(str(rpd_path))
@@ -366,39 +360,27 @@ def parse_rpd_sections(rpd_path: Path) -> list[dict]:
         r"^(?:Тема\s+\d+[.\s:]+|[-–•]\s*)(.+)$"
     )
 
-    # [FIX-§2.2.1] Расширенный стоп-список ФОС и служебных заголовков РПД.
-    # Исходный список не блокировал разделы 6.1/7/8 — «учебно-методическое
-    # обеспечение» и «материально-техническое обеспечение» ��опадали в темы,
-    # и LLM генерировал вопросы о кабинетах и лицензиях вместо дисциплины.
+    # [FIX-§2.2.1]
     _FOS_STOPWORDS = (
         "форм", "перечень оценочн", "контрол", "аттестац",
         "промежуточн", "текущ", "фонд оценочн", "критери",
         "шкал", "показател оценивани",
-        # [FIX-§2.2.1] Служебные разделы РПД (6.1, 7, 8)
+        # [FIX-§2.2.1]
         "учебно-методич", "материально-технич", "обеспечени",
         "программн обеспечени", "перечень ресурс",
-        # [FIX-§15.3.1] ОВЗ / доступность — бойлерплейт, одинаковый во всех РПД.
-        # 8 из 31 вопроса Ранга 3 генерировались по этим строкам вместо тем дисциплины.
+        # [FIX-§15.3.1]
         "ограниченн возможност", "лиц с ограниченн", "инвалид",
         "обеспеченност дисциплин", "особых образоват",
         "условия для лиц", "доступн среда", "адаптированн",
-        # [FIX-§BL1] Заголовки раздела «Учебно-методическое обеспечение»:
-        # «об обеспеченности» и «основной и дополнительной» — это подзаголовки
-        # списков литературы, не темы дисциплины.
+        # [FIX-§BL1]
         "об обеспеченности", "основной и дополнительной",
     )
-    # [FIX-§2.2.1] Строки вида «6.1.», «7.», «8.» — заголовки разделов РПД,
-    # не темы дисциплины. Паттерн: начинается с цифра.цифра или цифра. + пробел/буква.
+    # [FIX-§2.2.1]
     _NUMERIC_HEADER_RE = re.compile(r"^\d+[\.\d]*[\.\s]")
-    # [FIX-§BL1] Строки вида «(38050) Название темы» — темы с кодом дисциплины
-    # в скобках. Попадают в топики из таблиц тематического плана, но содержат
-    # только технический идентификатор и не несут смысловой нагрузки для LLM.
+    # [FIX-§BL1]
     _DISCIPLINE_CODE_RE = re.compile(r"^\(\d+\)")
 
-    # [FIX-§15.3.1] Whitelist по discipline_focus из config.json.
-    # Если строка содержит хотя бы одно ключевое слово из discipline_focus —
-    # она проходит независимо от стоп-слов (защита от ложных срабатываний
-    # на технические термины вроде «доступность данных», «обеспечение API»).
+    # [FIX-§15.3.1]
     _focus_keywords: list[str] = []
     try:
         _cfg_raw = json.loads(Path(CONFIG_PATH).read_text(encoding="utf-8"))
@@ -426,7 +408,7 @@ def parse_rpd_sections(rpd_path: Path) -> list[dict]:
             current_section = {
                 "num":          int(m.group(1)),
                 "name":         m.group(2).strip().rstrip("."),
-                # [FIX-#6] компетенции из config.json заполняются после сборки разделов
+                # [FIX-#6]
                 "competencies": [],
                 "topics":       [],
             }
@@ -434,14 +416,14 @@ def parse_rpd_sections(rpd_path: Path) -> list[dict]:
 
         if current_section:
             tm = topic_pattern.match(text)
-            # [FIX-§2.2.1] Пропускаем служебные ФОС-строки
-            # [FIX-§15.3.1] Whitelist: если строка совпадает с discipline_focus — не блокируем
+            # [FIX-§2.2.1]
+            # [FIX-§15.3.1]
             if any(sw in text.lower() for sw in _FOS_STOPWORDS) and not _is_whitelisted(text):
                 continue
-            # [FIX-§2.2.1] Пропускаем заголовки разделов РПД: «6.1. Учебно-...», «7.», «8.»
+            # [FIX-§2.2.1]
             if _NUMERIC_HEADER_RE.match(text):
                 continue
-            # [FIX-§BL1] Пропускаем темы-заголовки с кодом дисциплины: «(38050) ...»
+            # [FIX-§BL1]
             if _DISCIPLINE_CODE_RE.match(text):
                 continue
             if tm and len(text) > 15:
@@ -458,11 +440,11 @@ def parse_rpd_sections(rpd_path: Path) -> list[dict]:
     if not sections:
         sections = _parse_sections_from_tables(doc)
 
-    # [FIX-#6] Строим дефолтный маппинг из config.json ПОСЛЕ сборки разделов
+    # [FIX-#6]
     _default_comp = _build_default_section_comp(len(sections))
     for s in sections:
         s["competencies"] = _default_comp.get(s["num"], list(_default_comp.get(1, ["УК-1"])))
-        # [FIX-#5] Ограничиваем число тем на раздел
+        # [FIX-#5]
         s["topics"] = s["topics"][:6]
 
     _enrich_with_comp_from_tables(doc, sections)
@@ -494,7 +476,7 @@ def _parse_sections_from_tables(doc: Document) -> list[dict]:
                         sections.append({
                             "num":          num,
                             "name":         m.group(2).strip().rstrip("."),
-                            # [FIX-#6] заполняется в parse_rpd_sections после сборки
+                            # [FIX-#6]
                             "competencies": [],
                             "topics":       [],
                         })
@@ -516,9 +498,7 @@ def _enrich_with_comp_from_tables(doc: Document, sections: list[dict]) -> None:
     for table in doc.tables:
         for row in table.rows:
             row_text = " ".join(cell.text.strip() for cell in row.cells)
-            # [FIX-§10.1] Заменён \b(\d+)\b на явный паттерн «Раздел N».
-            # Старый regex \b(\d+)\b срабатывал на ЛЮБОЕ число в строке (часы,
-            # страницы, з.е.) и ошибочно привязывал компетенции к этим «номерам».
+            # [FIX-§10.1]
             sec_m = re.search(r"Раздел\s+(\d+)", row_text, re.IGNORECASE)
             if not sec_m:
                 continue
@@ -548,10 +528,22 @@ RANK_PROMPTS = {
 """,
     2: """Сгенерируй {n} тестовых вопросов РАНГА 2 (понимание и применение).
 Правила для ранга 2:
-- Вопрос требует объяснить принцип, выбрать метод или сравнить подходы
+- Вопрос требует ПРИМЕНЕНИЯ знания в конкретной ситуации — НЕ воспроизведения определения
+- ЗАПРЕЩЕНЫ стартовые фразы: «Что такое», «Как называется», «Дайте определение», «Что понимают под»
+- РАЗРЕШЁННЫЕ стартовые фразы: «Какой метод следует применить для...», «Что произойдёт если...»,
+  «Выберите правильный порядок шагов...», «Студент решает задачу X — какой подход подходит?»,
+  «Чем отличается X от Y в контексте задачи Z?», «В каком случае целесообразно использовать...»
 - Ровно ОДИН правильный ответ из 4-х вариантов
 - Варианты ответов могут быть развёрнутыми (2-3 предложения)
 - Дистракторы содержат правдоподобные но неверные утверждения
+
+Пример правильного вопроса Ранга 2:
+ЗАДАНИЕ: Для классификации объектов с нечёткими границами между классами какой подход предпочтительнее?
+А) Нечёткий логический вывод, так как он позволяет задать степень принадлежности к классу
+Б) Линейная регрессия, так как она вычислительно проще и быстрее сходится
+В) Жёсткая кластеризация k-means, так как она гарантирует сходимость за конечное число итераций
+Г) Случайный лес без настройки гиперпараметров, так как он устойчив к шуму
+ПРАВИЛЬНЫЙ: А
 """,
     3: """Сгенерируй РОВНО {n} тестовых вопросов РАНГА 3 (анализ и синтез).
 Правила для ранга 3:
@@ -594,7 +586,6 @@ _PROMPT_TEMPLATE = """\
 
 def _shuffle_answers(q: dict) -> dict:
     """
-    [FIX-§2.2.2] Рандомизирует позицию правильного ответа.
 
     LLM всегда помещает правильный ответ на позицию А) — студент мог угадывать,
     всегда выбирая А). Перемешиваем тексты вариантов случайно, оставляя
@@ -617,7 +608,6 @@ def _shuffle_answers(q: dict) -> dict:
 
 def _filter_duplicate_distractors(questions: list[dict]) -> list[dict]:
     """
-    [FIX-§2.2.3] Удаляет вопросы с повторяющимися дистракторами.
 
     LLM повторяет «безопасные» формулировки дистракторов в 5+ вопросах подряд.
     Считаем частоту каждого дистрактора (неправильного варианта) внутри батча.
@@ -763,7 +753,7 @@ def _parse_questions_from_llm(raw: str, rank: int,
         })
         q_idx += 1
 
-    # [FIX-§2.2.2] Рандомизируем позицию правильного ответа
+    # [FIX-§2.2.2]
     questions = [_shuffle_answers(q) for q in questions]
     return questions
 
@@ -829,9 +819,7 @@ def generate_questions_for_section(
                 n=n_per_topic,
             )
 
-            # [FIX-§15.5.2] num_predict зависит от ранга:
-            # Ранг 3 требует НЕСКОЛЬКО правильных — 1400 токенов обрезало
-            # ответ после 1-го вопроса из 10.
+            # [FIX-§15.5.2]
             _max_tok = 2000 if rank == 3 else 1400
             raw = llm(prompt, max_tokens=_max_tok)
 
@@ -871,7 +859,7 @@ def generate_questions_for_section(
             global_idx += len(extra)
 
         print(f"     ✅ Ранг {rank}: итого {len(rank_questions)} вопросов")
-        # [FIX-§2.2.3] Пост-фильтр дублирующихся дистракторов внутри ранга
+        # [FIX-§2.2.3]
         rank_questions = _filter_duplicate_distractors(rank_questions)
         all_questions.extend(rank_questions)
 

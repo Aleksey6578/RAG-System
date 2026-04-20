@@ -71,7 +71,6 @@ def embed_text(text: str) -> list | None:
     Получает embedding для одного текста через RouterAI API.
     [N] Тексты длиннее MAX_EMBED_CHARS обрезаются.
 
-    [FIX-NONE] Отчёт §3.2: 3 всплеска ошибок NoneType (object is not
     subscriptable) на позициях ~2600, ~4300, ~5000–5400. Причина: RouterAI
     API изредка возвращает пустой response.data (пустой список) или None,
     тогда response.data[0].embedding падает с TypeError. Добавлены:
@@ -79,7 +78,7 @@ def embed_text(text: str) -> list | None:
       • явная проверка response, response.data, len > 0 и embedding is not None
       • исключение логируется с номером попытки, но не прерывает retry-цикл.
     """
-    # [FIX-NONE] Валидация входа: не отправляем пустой текст в API
+    # [FIX-NONE]
     if not text or not text.strip():
         print(f"  ⚠️  embed_text: пустой текст — пропуск")
         return None
@@ -95,7 +94,7 @@ def embed_text(text: str) -> list | None:
                 input=text,
                 encoding_format="float",
             )
-            # [FIX-NONE] Полная валидация ответа API
+            # [FIX-NONE]
             if response is None:
                 print(f"  ⚠️  embedding: response is None "
                       f"(попытка {attempt + 1}/{RETRY_COUNT})")

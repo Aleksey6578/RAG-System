@@ -39,17 +39,14 @@ import json
 import time
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
-# [FIX-#18] Единая embed-функция из utils.py
-# [FIX-§5] EMBED_MODEL импортируется из utils: единая точка изменения модели.
-#           OLLAMA_URL удалён — мёртвый код после делегирования embed в utils.py.
+# [FIX-#18]
+# [FIX-§5]
 from utils import get_embedding as _embed_raw_utils, EMBED_MODEL
 
 COLLECTION     = "rpd_rag"
 QDRANT_URL     = "http://localhost:6333"
 BATCH_EMBED    = 1       # [M] количество параллельных потоков embedding
-# [FIX-#16] Прежний комментарий «снижено с 8 до 4» расходился с фактическим
-# значением 1. Значение 1 оптимально для локального Ollama: параллельные запросы
-# к одному GPU не дают прироста, а только создают очередь.
+# [FIX-#16]
 UPSERT_BATCH   = 64
 CHUNKS_FILE    = "chunks.jsonl"
 RETRY_COUNT    = 3
@@ -73,7 +70,6 @@ MAX_EMBED_CHARS = 4000
 def embed_text(text: str) -> list | None:
     """
     Получает embedding для одного текста через utils.get_embedding.
-    [FIX-#18] Делегируем в единую реализацию; prefix='passage' для индексируемых текстов.
     [N] Тексты длиннее MAX_EMBED_CHARS обрезаются внутри utils.get_embedding.
     """
     if len(text) > MAX_EMBED_CHARS:
@@ -126,7 +122,6 @@ def create_payload_indexes(collection: str) -> None:
 def upsert_batch(ids: list, vectors: list, payloads: list) -> tuple[bool, list]:
     """Загрузка батча в формате batch (ids/vectors/payloads).
     
-    [БАГ 11 ИСПРАВЛЕНО]: возвращает (успех, список failed point ids).
     HTTP 206 Partial Content раньше считался полным успехом, но тело содержит
     failed points — они не перезагружались даже при retry.
     """
@@ -160,7 +155,6 @@ def upsert_batch(ids: list, vectors: list, payloads: list) -> tuple[bool, list]:
 def upsert_batch_with_retry(ids: list, vectors: list, payloads: list) -> bool:
     """
     [O] Retry для upsert_batch при ошибках Qdrant (503, timeout и т.п.).
-    [З-L2] ИСПРАВЛЕНО: при HTTP 206 (частичная ошибка) прежняя реализация делала
     ровно один retry для failed_ids и возвращала результат — без цикла до RETRY_COUNT.
     Теперь failed_ids итеративно перезагружаются до RETRY_COUNT раз с экспоненциальной
     задержкой. Точки, не загруженные после всех попыток, явно логируются.
@@ -189,8 +183,7 @@ def upsert_batch_with_retry(ids: list, vectors: list, payloads: list) -> bool:
             time.sleep(delay)
             delay *= 2
 
-    # [БАГ-Б ИСПРАВЛЕНО]: функция возвращала None вместо False после исчерпания
-    # всех попыток — implicit falsy, но нарушает сигнатуру -> bool.
+    # [БАГ-Б ИСПРАВЛЕНО]
     print(f"  ❌ {len(ids)} точек не загружены после {RETRY_COUNT} попыток")
     return False
 
@@ -212,9 +205,7 @@ def main(append_mode: bool = False):
     else:
         print("Режим: RECREATE (коллекция будет пересоздана)")
 
-    # [З-L1] ИСПРАВЛЕНО: вместо submit() для всех чанков сразу (до ~2000 pending
-    # futures в памяти) обрабатываем батчами по EMBED_QUEUE_BATCH. При медленном
-    # Ollama это предотвращает накопление очереди и даёт равномерный прогресс.
+    # [З-L1]
     EMBED_QUEUE_BATCH = 200
     results: list = []
     skipped = 0
@@ -255,9 +246,7 @@ def main(append_mode: bool = False):
         return
 
     vector_size = len(results[0][0])
-    # [З-L3] ИСПРАВЛЕНО: информативное сообщение вместо голого AssertionError.
-    # bge-m3 поддерживает несколько вариантов размерности (1024 / 512 при квантизации).
-    # При несоответствии теперь выводится чёткая инструкция по исправлению.
+    # [З-L3]
     if vector_size != EMBED_DIM:
         print(
             f"❌ Размерность вектора {vector_size} ≠ EMBED_DIM={EMBED_DIM}.\n"
@@ -311,9 +300,7 @@ def main(append_mode: bool = False):
                 "id":            ch["id"],
                 "doc_id":        ch.get("doc_id", ""),
                 "source":        ch.get("source", ""),
-                # [FIX-#8] Дублируем source как source_file для совместимости
-                # с book_loader: retrieve_for_section() читает оба ключа,
-                # но явный source_file исключает скрытый double-get.
+                # [FIX-#8]
                 "source_file":   ch.get("source", ""),
                 "section_title": ch.get("section_title", ""),
                 "section_level": ch.get("section_level", ""),

@@ -1,54 +1,54 @@
 {
   "discipline": "Интеллектуальные системы",
   "generated_docx": "output_rpd.docx",
-  "reference_source": "rpd_29.json",
-  "reference_title": "Нейросетевые методы в управлении",
+  "reference_source": "rpd_10.json",
+  "reference_title": "Архитектуры распределённых систем",
   "reference_mode": "docx",
-  "embedding_similarity": 0.7744,
+  "embedding_similarity": 0.7966,
   "section_references": {},
   "metrics": {
     "competencies": {
-      "bleu": 0.1368,
+      "bleu": 0.1424,
       "rouge1": 0.7778,
       "rouge2": 0.375,
       "rougeL": 0.6667
     },
     "outcomes": {
-      "bleu": 0.1544,
-      "rouge1": 0.5466,
-      "rouge2": 0.4151,
-      "rougeL": 0.4845
+      "bleu": 0.1974,
+      "rouge1": 0.6783,
+      "rouge2": 0.5664,
+      "rougeL": 0.6783
     },
     "content": {
-      "bleu": 0.2239,
-      "rouge1": 0.5414,
-      "rouge2": 0.3206,
-      "rougeL": 0.406
+      "bleu": 0.2954,
+      "rouge1": 0.5781,
+      "rouge2": 0.3333,
+      "rougeL": 0.4375
     },
     "lab_works": {
-      "bleu": 0.1508,
-      "rouge1": 0.449,
-      "rouge2": 0.2128,
-      "rougeL": 0.4082
+      "bleu": 0.1945,
+      "rouge1": 0.5854,
+      "rouge2": 0.4103,
+      "rougeL": 0.5854
     },
     "practice": {
-      "bleu": 0.1485,
-      "rouge1": 0.4583,
-      "rouge2": 0.1739,
-      "rougeL": 0.375
+      "bleu": 0.203,
+      "rouge1": 0.5455,
+      "rouge2": 0.2381,
+      "rougeL": 0.5455
     },
     "bibliography": {
-      "bleu": 0.4518,
-      "rouge1": 0.5263,
+      "bleu": 0.4602,
+      "rouge1": 0.5526,
       "rouge2": 0.3243,
       "rougeL": 0.5263
     },
     "overall": {
-      "bleu": 0.3604,
-      "rouge1": 0.6568,
-      "rouge2": 0.5174,
-      "rougeL": 0.5331
+      "bleu": 0.3342,
+      "rouge1": 0.6949,
+      "rouge2": 0.5652,
+      "rougeL": 0.5822
     }
   },
-  "timestamp": "2026-04-18T18:54:04"
+  "timestamp": "2026-04-20T17:40:14"
 }

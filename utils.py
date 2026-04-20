@@ -19,7 +19,6 @@ MAX_EMBED_CHARS = 4000
 
 def classify_section(title: str) -> str:
     """
-    [§3.2.1] Единая классификация типов разделов РПД по заголовку.
 
     Вынесена из chunking.py и converter.py для устранения риска
     рассинхронизации: ранее два разных скрипта поддерживали параллельные
@@ -35,17 +34,21 @@ def classify_section(title: str) -> str:
     if re.search(r"цел[ьи]|задач[аи]", t):                                     return "goals"
     if re.search(r"компетенц", t):                                               return "competencies"
     if re.search(r"результат.{0,10}обучен|индикатор", t):                       return "learning_outcomes"
-    if re.search(r"содержан|лекц|лаборатор|практич|тем[аы]", t):               return "content"
-    # [FIX-1б] «самостоятельн» убрано из assessment: заголовки вида
-    # «Самостоятельная работа студента» некорректно попадали в assessment.
+    # [З-11] Subtypes идут перед общим "content" — порядок важен.
+    # Расширены паттерны для синтетических РПД (rpd_52+): "учебные занятия",
+    # "тематический план", "занятие", "модуль" и т.д.
+    if re.search(r"лаборатор|лаб\.\s*работ", t):                               return "lab_content"
+    if re.search(r"практич|практик", t):                                        return "practice_content"
+    if re.search(r"лекц", t):                                                   return "lecture_content"
+    if re.search(r"содержан|тем[аы]|тематическ|занятие|занятий"
+                 r"|учебн.{0,10}(план|занят|модул)|модул|раздел.{0,10}дисципл", t):
+                                                                                return "content"
+    # [FIX-1б]
     if re.search(r"фос|фонд оценочн|оценочн|аттестац|контрол|виды\s+сро", t): return "assessment"
-    # [FIX-BIBLIO-PRIO] bibliography ВЫШЕ accessibility и hours:
-    # комбинированные заголовки «Для лиц с ОВЗ, об обеспеченности литературой»
-    # по содержанию библиографические → проверяем первым.
+    # [FIX-BIBLIO-PRIO]
     if re.search(r"литератур|библиограф|учебно.метод|учебной литератур"
                  r"|обеспеченност|^сведени", t):                                 return "bibliography"
-    # [FIX-BIBLIO-PRIO] accessibility ПОСЛЕ bibliography — ловит только
-    # чисто ОВЗ-секции без библиографических ключевых слов.
+    # [FIX-BIBLIO-PRIO]
     if re.search(r"доступн|инвалид|огранич.{0,15}возможн|здоровь|овз", t):     return "accessibility"
     if re.search(r"методическ", t):                                             return "methodical"
     if re.search(r"место.{0,15}дисципл|структур.{0,10}опоп", t):               return "place"
@@ -97,6 +100,9 @@ def get_embedding(text: str, prefix: str = "query", retry: int = 3, use_prefix: 
                 vec = data_list[0].get("embedding") if data_list else None
             if vec:
                 return vec
+            # [FIX-NORESP] API ответил без исключения, но без вектора — пауза перед retry
+            time.sleep(delay)
+            delay *= 2
         except Exception as e:
             if attempt == retry - 1:
                 print(f"  ⚠️  Ошибка эмбеддинга (попытка {attempt+1}/{retry}): {e}")

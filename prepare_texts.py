@@ -41,15 +41,10 @@ OUTPUT_FILE = "data_clean.jsonl"
 # Позволяет проставить доменные поля для фильтрации в Qdrant / rpd_generate.
 CORPUS_META_FILE = os.path.join(DATA_DIR, "corpus_meta.json")
 
-# [FIX-#17] MIN_WORDS поднят с 10 до 21 (рекомендация аудита: 20–22).
-# При MIN_WORDS=10 короткие строки вида «Зачётная единица: 4» (~4 слова)
-# после округления count_tokens(*1.8) давали tc≈7 и проходили в corpus.
-# Порог 21 слово ≈ ~38 токенов — соответствует MIN_TOKENS=40 в chunking.py
-# и отсекает ~5–10% бессодержательных коротких записей.
+# [FIX-#17]
 MIN_WORDS = 21
 
-# [§15.4.1] Паттерн для извлечения названия дисциплины из текста первых чанков.
-# Ищет строку «РАБОЧАЯ ПРОГРАММА ДИСЦИПЛИНЫ» и берёт следующую непустую строку.
+# [§15.4.1]
 _RPD_TITLE_RE = re.compile(
     r"РАБОЧАЯ\s+ПРОГРАММА\s+ДИСЦИПЛИНЫ[^\n]*\n+([^\n]{5,120})",
     re.IGNORECASE,
@@ -57,7 +52,7 @@ _RPD_TITLE_RE = re.compile(
 
 
 def extract_discipline_title(records: list) -> str:
-    """[§15.4.1] Ищет название дисциплины в тексте первых 10 чанков документа."""
+    """Ищет название дисциплины в тексте первых 10 чанков документа."""
     for rec in records[:10]:
         text = rec.get("text", "")
         m = _RPD_TITLE_RE.search(text)
@@ -68,7 +63,6 @@ def extract_discipline_title(records: list) -> str:
 
 def _normalize_title_field(title: str) -> str:
     """
-    [FIX-TITLE-NORM] Нормализация title — удаление табличного мусора (отчёт §2.4).
     
     Заголовки в корпусе содержат табличный мусор:
     «2 | Извлечение знаний из нейронных сетей | 7 | 3 | 9 | 4 | 1».
@@ -90,9 +84,7 @@ def normalize_list_markers(text: str) -> str:
     """[F] Унифицирует маркеры списков в формат '- item'."""
     text = re.sub(r"^[ \t]*[•●▪◦]\s+", "- ", text, flags=re.MULTILINE)
     text = re.sub(r"^[ \t]*[–—]\s+", "- ", text, flags=re.MULTILINE)
-    # [БАГ 12 ИСПРАВЛЕНО]: добавлен негативный lookahead (?!\d{1,2}[.,]) чтобы
-    # паттерн не срабатывал на даты вида "1. января", "21. марта" и т.п.
-    # Capture group (\d+) сохранена для совместимости, но не используется (re.sub игнорирует).
+    # [БАГ 12 ИСПРАВЛЕНО]
     text = re.sub(r"^[ \t]*\(?\d+[.)]\s+(?!\d{1,2}[.,])", "- ", text, flags=re.MULTILINE)
     return text
 
@@ -183,7 +175,7 @@ def process_record(
     output_record = {
         "source":           source,
         "document_id":      record.get("document_id", ""),
-        # [FIX-TITLE-NORM] Нормализация title — удаление табличного мусора (отчёт §2.4).
+        # [FIX-TITLE-NORM]
         "title":            _normalize_title_field(record.get("title") or discipline_title or ""),
         "section_title":    record.get("section_title"),
         "section_level":    record.get("section_level", 0),   # [6] уже int из converter v3.2
@@ -244,7 +236,7 @@ def process_file(path: str, out_file, seen: set,
         records       = data if isinstance(data, list) else [data]
         document_meta = None
 
-    # [§15.4.1] Извлечь название дисциплины из текста — fallback для пустых title
+    # [§15.4.1]
     discipline_title = extract_discipline_title(records)
 
     for r in records:
@@ -264,13 +256,12 @@ def process_file(path: str, out_file, seen: set,
 
 def main():
     seen: set = set()
-    # [З-P1] Два раздельных множества:
-    # seen_doc_ids — MD5(filename) для пропуска полных дублей по имени.
-    # seen_content_hashes — MD5(text) для пропуска файлов с идентичным содержимым.
-    # [БАГ-В ИСПРАВЛЕНО]: прежде оба значения помещались в один set → проверка
-    # `doc_id in seen_doc_ids` могла ложно срабатывать на content_hash другого файла.
+    # [З-P1]
+    # [БАГ-В ИСПРАВЛЕНО]
     seen_doc_ids: set        = set()
     seen_content_hashes: set = set()
+    # [FIX-З16]
+    seen_disc_titles: set    = set()
     total_written = total_dups = total_skipped_docs = 0
     table_count = 0
 
@@ -281,7 +272,7 @@ def main():
     else:
         print("corpus_meta.json: не найден — direction/level/department будут пустыми")
 
-    # [З-P3] Проверяем соответствие corpus_meta и реальных файлов
+    # [З-P3]
     if corpus_meta:
         real_files = {fn for fn in os.listdir(DATA_DIR)
                       if fn.endswith(".json") and fn != "corpus_meta.json"}
@@ -302,7 +293,7 @@ def main():
                 with open(path, encoding="utf-8") as _f:
                     _raw = json.load(_f)
 
-                # [З-P1] Проверка по document_id (MD5 имени файла)
+                # [З-P1]
                 doc_id = _raw.get("document_id", "") if isinstance(_raw, dict) else ""
                 if doc_id and doc_id in seen_doc_ids:
                     print(f"  ⏭  {fn}: пропущен (document_id совпадает — дубль)")
@@ -328,6 +319,22 @@ def main():
                 if doc_id:
                     seen_doc_ids.add(doc_id)
 
+                # [FIX-З16] Приоритет — corpus_meta.json (discipline), фолбэк — regex
+                _disc_title = (corpus_meta or {}).get(fn, {}).get("discipline", "")
+                if not _disc_title:
+                    _records_for_title = (
+                        _raw["chunks"] if isinstance(_raw, dict) and "chunks" in _raw
+                        else (_raw if isinstance(_raw, list) else [])
+                    )
+                    _disc_title = extract_discipline_title(_records_for_title)
+                _disc_key = re.sub(r"\s+", " ", _disc_title.lower().strip()) if _disc_title else ""
+                if _disc_key and _disc_key in seen_disc_titles:
+                    print(f"  ⏭  {fn}: пропущен (дубль дисциплины «{_disc_title}»)")
+                    total_skipped_docs += 1
+                    continue
+                if _disc_key:
+                    seen_disc_titles.add(_disc_key)
+
                 w, d = process_file(path, out, seen, corpus_meta=corpus_meta)
                 total_written += w
                 total_dups    += d
@@ -351,7 +358,7 @@ def main():
     print(f"  Таблиц с table_data: {table_count}")
     print(f"  Уникальность: {total_written / max(total_written + total_dups, 1) * 100:.1f}%")
 
-    # [FIX-#12] Блок статистики token_count_est удалён — поле убрано из записей.
+    # [FIX-#12]
 
     # [X] Статистика доменных полей
     with open(OUTPUT_FILE, encoding="utf-8") as f:

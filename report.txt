@@ -28,9 +28,6 @@ python evaluate_routerai.py
 python test_generate_routerai.py
 ----
 
-# рядом должен быть corpus_meta.json для настройки domains РПД абзацев
-py reclassify_domains.py
-
 # Текущий корпус с реальным порогом для RAG:
 python analyze_corpus.py --corpus-dir rpd_corpus
 
