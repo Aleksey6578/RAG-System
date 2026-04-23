@@ -146,6 +146,14 @@ SECTION_TYPE_FILTER = {
     "bibliography_main": ["bibliography", "place"],
 }
 
+# [З-6] Для секций outcomes/competencies берём ≤1 чанка из одного RPD-источника.
+# MAX_PER_SOURCE=2 (дефолт) позволял IoT-RPD дать 2 чанка в outcomes «ИС»,
+# т.к. direction-фильтрация не работала при пустых полях в Qdrant.
+_MAX_PER_SOURCE_OVERRIDE: dict = {
+    "outcomes":     1,
+    "competencies": 1,
+}
+
 EMBED_CACHE    = {}
 RETRIEVE_CACHE = {}
 
@@ -433,7 +441,7 @@ def retrieve(section: str, discipline: str, section_types: list = None,
                     all_hits[hit_id] = h
 
         # [FIX-5]
-        MAX_PER_SOURCE = 2
+        MAX_PER_SOURCE = _MAX_PER_SOURCE_OVERRIDE.get(section, 2)  # [З-6]
         _source_counts: dict = {}
         _diverse_all: list = []
         for h in sorted(all_hits.values(), key=lambda h: h.get("score", 0), reverse=True):
@@ -1380,7 +1388,29 @@ def parse_outcomes_json(text: str, required_count: int = 0) -> list | None:
         return None
 
 
-def parse_outcomes(text: str) -> list:
+def _dedup_outcomes(outcomes: list) -> list:
+    """
+    [FIX-#6] Постпроцессинг: удаляет дублирующиеся тексты одного типа (З/У/В).
+    При дубле строка пропускается — итоговое число может уменьшиться,
+    что корректно запускает retry в parse_outcomes_json (required_count не выполнен).
+    """
+    seen_by_type: dict = {"З": set(), "У": set(), "В": set()}
+    result = []
+    for otype, otext in outcomes:
+        key = re.sub(r"\s+", " ", otext).strip()[:80].lower()
+        bucket = seen_by_type.get(otype)
+        if bucket is None:
+            result.append((otype, otext))
+            continue
+        if key not in bucket:
+            bucket.add(key)
+            result.append((otype, otext))
+        else:
+            print(f"  ⚠️  [outcomes] Дубль удалён: [{otype}] {otext[:60]!r}")
+    return result
+
+
+
     """
     [A] Парсит результаты обучения: JSON-режим → regex-fallback.
     """
@@ -2382,9 +2412,10 @@ def fill_t6_workload(doc: Document, lec: int, pz: int, lr: int, sro: int,
     for header_row in t.rows[:4]:
         for j, cell in enumerate(header_row.cells):
             cell_text = cell.text.strip()
-            # [FIX-SEM]
-            _sem_re = re.compile(r'(?<!\d)' + re.escape(sem_str) + r'(?!\d)')
-            if cell_text == sem_str or _sem_re.search(cell_text):
+            # [FIX-SEM-OBO] Точное совпадение — regex ранее матчил "7" внутри "7–8"
+            # (знак тире после цифры не является \d → lookahead срабатывал),
+            # что сдвигало sem_col на позицию объединённой ячейки семестра N+1.
+            if cell_text == sem_str:
                 sem_col = j
                 break
         if sem_col is not None:
@@ -2426,9 +2457,10 @@ def fill_t6_workload(doc: Document, lec: int, pz: int, lr: int, sro: int,
 
     # [FIX-T6-SRO]
     hrs_study = round(sro * 0.20)           # изучение вынесенного материала
-    hrs_rgr   = round(sro * 0.20)           # РГР / реферат
+    hrs_main  = round(sro * 0.20)           # [FIX-#5] РГР / реферат / индив. задание
+    hrs_rgr   = hrs_main                    # синоним для обратной совместимости
     # [FIX-EXAM-PREP]
-    hrs_prep  = sro - hrs_study - hrs_rgr - exam_prep_hours   # подготовка к ЛР/ПЗ
+    hrs_prep  = sro - hrs_study - hrs_main - exam_prep_hours   # подготовка к ЛР/ПЗ
 
     kw_map = {
         "контактная":             total_contact,
@@ -2589,7 +2621,11 @@ def fill_t21_fos(doc: Document, competencies: list, topics: list,
             for type_idx, res_type in enumerate(("З", "У", "В")):
                 type_outcomes = outcomes_by_type[res_type]
                 outcome_text  = (
-                    type_outcomes[(comp_idx * 3 + type_idx) % len(type_outcomes)]
+                    # [FIX-#4] Было: (comp_idx * 3 + type_idx) % len → для любого
+                    # comp_idx выражение mod 3 давало тот же остаток что и type_idx,
+                    # т.е. все компетенции брали одну и ту же строку.
+                    # Теперь: comp_idx % len — разные компетенции → разные тексты.
+                    type_outcomes[comp_idx % len(type_outcomes)]
                     if type_outcomes else _fallbacks[res_type]
                 )
                 indicator_num = type_idx + 1
@@ -2721,18 +2757,19 @@ PROMPTS = {
 - Не повторяй одни и те же слова-головы в разных строках одного типа
 - Содержат специфику «{discipline}», НЕ копируй примеры
 
-Пример формата (для другой дисциплины «Компьютерное зрение», 3 компетенции):
+Пример формата (для другой дисциплины «Базы данных», ТОЛЬКО 2 компетенции → 6 объектов):
 [
-  {{"type": "З", "text": "методы детектирования объектов: YOLO, SSD, Faster R-CNN"}},
-  {{"type": "З", "text": "принципы сегментации изображений: семантическую и экземплярную"}},
-  {{"type": "З", "text": "алгоритмы выделения ключевых точек: SIFT, ORB, SuperPoint"}},
-  {{"type": "У", "text": "реализовывать нейронные детекторы объектов в PyTorch"}},
-  {{"type": "У", "text": "применять OpenCV для предобработки и аугментации изображений"}},
-  {{"type": "У", "text": "оценивать качество моделей по метрикам mAP, Precision, Recall"}},
-  {{"type": "В", "text": "навыками обучения и тонкой настройки CNN на датасетах COCO, VOC"}},
-  {{"type": "В", "text": "методами трекинга объектов: ByteTrack, SORT, DeepSORT"}},
-  {{"type": "В", "text": "инструментами визуализации Grad-CAM для интерпретации сети"}}
+  {{"type": "З", "text": "реляционную модель данных и нормальные формы"}},
+  {{"type": "З", "text": "принципы построения индексов B-tree и Hash"}},
+  {{"type": "У", "text": "проектировать схему БД в соответствии с предметной областью"}},
+  {{"type": "У", "text": "оптимизировать SQL-запросы с помощью EXPLAIN ANALYZE"}},
+  {{"type": "В", "text": "навыками администрирования PostgreSQL и настройки транзакций"}},
+  {{"type": "В", "text": "методами резервного копирования и восстановления данных"}}
 ]
+
+ЖЁСТКОЕ ТРЕБОВАНИЕ: ровно {outcomes_total} объектов — не меньше!
+Для каждой из {competency_count} компетенций ({competency_codes_list}) нужно
+СВОЁ З + СВОЁ У + СВОЁ В. Итого: {competency_count}×3 = {outcomes_total}.
 
 ВЕРНИ ТОЛЬКО JSON-массив (без пояснений, без markdown).
 Ровно {outcomes_total} объектов ({competency_count}З + {competency_count}У +
@@ -3004,8 +3041,25 @@ def main(config_path: Optional[str] = None, clear_cache: bool = False):
     raw: dict = {}
 
     # --- Шаг 1: компетенции и результаты обучения ---
-    # [FIX-FGOS]
-    _fgos = cfg.get("fgos_competencies", {})
+    # [FIX-FGOS-2] Компетенции берутся из fgos/<direction_code>.json.
+    # Fallback 1: fgos_competencies в config.json (обратная совместимость).
+    # Fallback 2: LLM-генерация.
+    _direction_code = direction.split()[0]  # "09.03.01 Информатика..." → "09.03.01"
+    _fgos_path = Path("fgos") / f"{_direction_code}.json"
+    if _fgos_path.exists():
+        try:
+            _fgos = {k: v for k, v in json.loads(_fgos_path.read_text(encoding="utf-8")).items()
+                     if not k.startswith("_")}
+            print(f"  ✅ [FGOS] Загружен файл: {_fgos_path}")
+        except Exception as _e:
+            print(f"  ⚠️  [FGOS] Ошибка чтения {_fgos_path}: {_e} — fallback config.json")
+            _fgos = cfg.get("fgos_competencies", {})
+    else:
+        _fgos = cfg.get("fgos_competencies", {})
+        if _fgos:
+            print(f"  ℹ️  [FGOS] Файл {_fgos_path} не найден — используется fgos_competencies из config.json")
+        else:
+            print(f"  ⚠️  [FGOS] Файл {_fgos_path} не найден и fgos_competencies пуст — генерирую LLM")
     if _fgos and isinstance(_fgos, dict):
         competencies = [
             (code, _fgos[code])
@@ -3046,9 +3100,11 @@ def main(config_path: Optional[str] = None, clear_cache: bool = False):
         "outcomes", discipline, PROMPTS["outcomes"],
         # [FIX-02]
         parser_json=lambda t: parse_outcomes_json(t, required_count=len(codes_list) * 3),
-        parser_fallback=parse_outcomes,
+        parser_fallback=parse_outcomes_json,
         direction=direction, level=level, **base_vars
     )
+    # [FIX-#6] Снимаем дубли после парсинга
+    outcomes = _dedup_outcomes(outcomes)
 
     # --- Шаг 2: обновляем competencies_summary и перегенерируем разделы ---
     comp_summary = "; ".join(f"{c[0]}: {c[1][:60]}" for c in competencies[:5])

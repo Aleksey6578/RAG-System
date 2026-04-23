@@ -423,8 +423,19 @@ def main():
     # [FIX-1а]
     # [FIX-LIMITS]
     type_limits: dict = {
-        "assessment":    20,   # было 12 → теряло ~660 блоков
-        "accessibility": 10,   # было 5 → теряло ~310 блоков
+        "assessment":       20,   # было 12 → теряло ~660 блоков
+        "accessibility":    10,   # было 5 → теряло ~310 блоков
+        # [FIX-#11] competencies составляли лишь 1.4% (80 чанков из 5690).
+        # При MAX_CHUNKS_PER_SECTION_TYPE=30 per-source и 53 документах
+        # реально проходило ~1-2 чанка на документ. Поднимаем до 5 —
+        # с 53 РПД даёт ~265 competency-чанков против текущих 80.
+        "competencies":     5,
+        # [З-9] Без явного лимита lab_content вырастал до 2241 чанков
+        # vs content=104 — дисбаланс 22:1. Кап=30 даёт ~1710 max при
+        # 57 документах, при этом не затрагивает content-retrieval
+        # (SECTION_TYPE_FILTER["content"] = ["content","lecture_content"]).
+        "lab_content":      30,
+        "practice_content": 30,
     }
     if os.path.exists("config.json"):
         try:

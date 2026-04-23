@@ -1,54 +1,68 @@
 {
   "discipline": "Интеллектуальные системы",
   "generated_docx": "output_rpd.docx",
-  "reference_source": "rpd_10.json",
-  "reference_title": "Архитектуры распределённых систем",
+  "reference_source": "rpd_117.json",
+  "reference_title": "Архитектуры встроенных систем",
   "reference_mode": "docx",
-  "embedding_similarity": 0.7966,
+  "embedding_similarity": 0.8222,
   "section_references": {},
-  "metrics": {
-    "competencies": {
-      "bleu": 0.1424,
-      "rouge1": 0.7778,
-      "rouge2": 0.375,
-      "rougeL": 0.6667
-    },
-    "outcomes": {
-      "bleu": 0.1974,
-      "rouge1": 0.6783,
-      "rouge2": 0.5664,
-      "rougeL": 0.6783
-    },
-    "content": {
-      "bleu": 0.2954,
-      "rouge1": 0.5781,
-      "rouge2": 0.3333,
-      "rougeL": 0.4375
-    },
+  "section_best_candidates": {
     "lab_works": {
-      "bleu": 0.1945,
-      "rouge1": 0.5854,
-      "rouge2": 0.4103,
-      "rougeL": 0.5854
+      "source": "rpd_1.json",
+      "title": "Этапы научного исследования",
+      "similarity": 0.7075,
+      "used": false
     },
     "practice": {
-      "bleu": 0.203,
-      "rouge1": 0.5455,
-      "rouge2": 0.2381,
-      "rougeL": 0.5455
-    },
-    "bibliography": {
-      "bleu": 0.4602,
-      "rouge1": 0.5526,
-      "rouge2": 0.3243,
-      "rougeL": 0.5263
-    },
-    "overall": {
-      "bleu": 0.3342,
-      "rouge1": 0.6949,
-      "rouge2": 0.5652,
-      "rougeL": 0.5822
+      "source": "rpd_1.json",
+      "title": "Этапы научного исследования",
+      "similarity": 0.7168,
+      "used": false
     }
   },
-  "timestamp": "2026-04-20T17:40:14"
+  "metrics": {
+    "competencies": {
+      "bleu": 1.0,
+      "rouge1": 1.0,
+      "rouge2": 1.0,
+      "rougeL": 1.0
+    },
+    "outcomes": {
+      "bleu": 0.3313,
+      "rouge1": 0.7059,
+      "rouge2": 0.4762,
+      "rougeL": 0.7059
+    },
+    "content": {
+      "bleu": 0.38,
+      "rouge1": 0.6,
+      "rouge2": 0.3378,
+      "rougeL": 0.5867
+    },
+    "lab_works": {
+      "bleu": 0.2325,
+      "rouge1": 0.7037,
+      "rouge2": 0.4231,
+      "rougeL": 0.7037
+    },
+    "practice": {
+      "bleu": 0.1995,
+      "rouge1": 0.4286,
+      "rouge2": 0.1481,
+      "rougeL": 0.4286
+    },
+    "bibliography": {
+      "bleu": 0.6291,
+      "rouge1": 0.7077,
+      "rouge2": 0.6349,
+      "rougeL": 0.7077
+    },
+    "overall": {
+      "bleu": 0.597,
+      "rouge1": 0.7678,
+      "rouge2": 0.6387,
+      "rougeL": 0.7573
+    }
+  },
+  "timestamp": "2026-04-23T09:48:36"
 }

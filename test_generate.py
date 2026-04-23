@@ -349,11 +349,26 @@ def parse_rpd_sections(rpd_path: Path) -> list[dict]:
         "условия для лиц", "доступн среда", "адаптированн",
         # [FIX-§BL1]
         "об обеспеченности", "основной и дополнительной",
+        # [FIX-#7b] шапочные строки без bullet-префикса
+        "уровень высшего", "направлен подготовки", "квалификаци",
+        "форма обучени", "год приема",
+        # [FIX-#7c] строки подписи/колонтитула УГНТУ
+        "заведующ",   # «Заведующий кафедрой...» — блок подписи
+        "уфимск",     # «Уфимский государственный...» с ведущим «» обходил _INSTITUTION_KW_RE
     )
     # [FIX-§2.2.1]
     _NUMERIC_HEADER_RE = re.compile(r"^\d+[\.\d]*[\.\s]")
     # [FIX-§BL1]
     _DISCIPLINE_CODE_RE = re.compile(r"^\(\d+\)")
+    # [FIX-#7] Строки шапки документа УГНТУ попадали в темы раздела:
+    # «Федеральное государственное...», «Уфимский государственный нефтяной...».
+    # Длина > 30 симв. + не попадают ни под _FOS_STOPWORDS, ни под _NUMERIC_HEADER_RE.
+    _INSTITUTION_KW_RE = re.compile(
+        r"^(?:федеральн|государственн\s+бюджетн|государственн\s+автономн|"
+        r"министерств|уфимский\s+государственн|угнту|"
+        r"высшего\s+образования|образовательн\s+учреждени)",
+        re.IGNORECASE,
+    )
 
     # [FIX-§15.3.1]
     _focus_keywords: list[str] = []
@@ -401,9 +416,28 @@ def parse_rpd_sections(rpd_path: Path) -> list[dict]:
             # [FIX-§BL1]
             if _DISCIPLINE_CODE_RE.match(text):
                 continue
+            # [FIX-#7] Строки шапки УГНТУ
+            if _INSTITUTION_KW_RE.match(text):
+                continue
             if tm and len(text) > 15:
-                current_section["topics"].append(tm.group(1).strip())
+                # [FIX-#7b] topic_pattern снимает bullet [-–•], поэтому
+                # _INSTITUTION_KW_RE.match(text) не срабатывал на «- Уфимский...».
+                # Проверяем group(1) (извлечённую тему) дополнительно.
+                _topic = tm.group(1).strip()
+                if (_INSTITUTION_KW_RE.match(_topic)
+                        or any(sw in _topic.lower() for sw in _FOS_STOPWORDS)):
+                    continue
+                current_section["topics"].append(_topic)
             elif len(text) > 30 and not section_pattern.match(text):
+                # [FIX-З-2] Применяем те же фильтры институциональных/стоп-слов
+                # что и для tm-ветки. Раньше строки шапки УГНТУ («Уфимский
+                # государственный нефтяной технический университет», «Уровень
+                # высшего образования: бакалавриат») не проходили через
+                # _INSTITUTION_KW_RE и _FOS_STOPWORDS в этой ветке, попадая в темы.
+                if _INSTITUTION_KW_RE.match(text):
+                    continue
+                if any(sw in text.lower() for sw in _FOS_STOPWORDS) and not _is_whitelisted(text):
+                    continue
                 if not any(kw in text for kw in
                            ["Трудоем", "Семестр", "Форма", "Кафедр", "Зачетн",
                             "ИТОГО", "подготовка", "выполнение", "изучение"]):
@@ -532,6 +566,7 @@ _PROMPT_TEMPLATE = """\
 Контекст из учебников (используй для формулировок):
 {context}
 
+{term_glossary}
 === ФОРМАТ ОТВЕТА — строго соблюдать ===
 Для каждого вопроса выводи блок:
 
@@ -542,6 +577,19 @@ _PROMPT_TEMPLATE = """\
 Г) <вариант Г>
 ПРАВИЛЬНЫЙ: <буква(ы) через запятую, например: А или А, В>
 ===
+
+КРИТИЧЕСКИЕ ТРЕБОВАНИЯ К ПРАВИЛЬНЫМ ОТВЕТАМ:
+- [FIX-З-3] Правильный ответ ОБЯЗАН быть фактически верным с точки зрения науки и практики
+- [FIX-З-3] Перед выводом «ПРАВИЛЬНЫЙ:» внутренне проверь: «Это утверждение истинно?»
+- [FIX-З-3] НЕ допускается: правильный ответ содержит отрицание необходимого этапа («не требует», «не нужен»), если это ложно
+- [FIX-З-3] НЕ допускается: backpropagation → «обратное обучение» (верно: «метод обратного распространения ошибки»)
+- [FIX-З-3] НЕ допускается: CNN → «алгоритм деревьев решений» (CNN = сверточная нейронная сеть)
+- [FIX-З-3] Аббревиатуры: используй единственную расшифровку на протяжении всего набора вопросов (PDDL = Planning Domain Definition Language = Язык описания домена для планирования)
+- [FIX-З-3] Дистракторы должны быть правдоподобными, но однозначно неверными — не инвертируй необходимые условия в «правильный» ответ
+
+ТРЕБОВАНИЯ К ДИСТРАКТОРАМ (неправильным вариантам):
+- [FIX-#8] Все дистракторы уникальны внутри одного вопроса и не повторяются в других вопросах этого набора
+- Не используй одни и те же неправильные ответы повторно — каждый вопрос должен иметь свои уникальные дистракторы
 
 Выведи ровно {n} таких блоков. Без нумерации, без пояснений вне блоков.
 """
@@ -605,6 +653,48 @@ def _filter_duplicate_distractors(questions: list[dict]) -> list[dict]:
     if removed:
         print(f"  ✂️  Исключено {removed} вопросов с дублями дистракторов")
     return filtered
+
+
+def _filter_near_duplicate_questions(questions: list[dict], threshold: float = 0.72) -> list[dict]:
+    """
+    [FIX-З-7] Удаляет почти-дублирующиеся вопросы внутри батча.
+
+    Причина: мусорные темы (З-2) порождают повторные промпты по одной и той же
+    теме → LLM генерирует 8-10 семантически идентичных вопросов (3031–3035
+    про кросс-валидацию/автодифференцирование). Используем метрику пересечения
+    биграм (Jaccard) на нормализованных текстах заданий.
+
+    threshold=0.72 — эмпирически: ≥0.72 → «по сути один вопрос», <0.72 → разные.
+    """
+    def _bigrams(text: str) -> set:
+        t = re.sub(r"[^\w\s]", "", text.lower())
+        words = t.split()
+        return set(zip(words, words[1:])) if len(words) > 1 else set(words)
+
+    def _jaccard(a: set, b: set) -> float:
+        if not a and not b:
+            return 1.0
+        union = a | b
+        return len(a & b) / len(union) if union else 0.0
+
+    kept: list[dict] = []
+    removed = 0
+    for q in questions:
+        q_bg = _bigrams(q["task"])
+        is_dup = False
+        for kq in kept:
+            if _jaccard(q_bg, _bigrams(kq["task"])) >= threshold:
+                is_dup = True
+                break
+        if is_dup:
+            removed += 1
+        else:
+            kept.append(q)
+
+    if removed:
+        print(f"  ✂️  [З-7] Исключено {removed} почти-дублирующихся вопросов "
+              f"(порог Jaccard ≥ {threshold})")
+    return kept
 
 
 def _parse_questions_from_llm(raw: str, rank: int,
@@ -730,6 +820,29 @@ def _normalize_label(label: str) -> str:
     return mapping.get(label, label)
 
 
+def _build_term_glossary(cfg_path: Path = CONFIG_PATH) -> str:
+    """
+    [FIX-З-8] Читает term_definitions из config.json и строит секцию глоссария
+    для промпта, принуждая LLM использовать единственную расшифровку аббревиатур.
+    """
+    try:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        terms = cfg.get("term_definitions", {})
+        if not terms:
+            return ""
+        lines = ["=== ГЛОССАРИЙ ТЕРМИНОВ — использовать только эти расшифровки ==="]
+        for abbr, definition in terms.items():
+            lines.append(f"  {abbr} = {definition}")
+        lines.append("===\n")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+# Кэшируем глоссарий (вычисляется один раз)
+_TERM_GLOSSARY: str = _build_term_glossary()
+
+
 def generate_questions_for_section(
         section: dict,
         discipline: str,
@@ -765,9 +878,15 @@ def generate_questions_for_section(
         rank_questions: list[dict] = []
         n_target = n_per_rank  # минимум вопросов на ранг
 
+        # [FIX-#9] Запрашиваем с запасом: после _filter_duplicate_distractors
+        # теряется 3–7 вопросов на ранг → каждый ранг требовал retry.
+        # +5 компенсирует типичные потери без перегрузки промпта.
+        _OVERDRAFT = 5
+        n_request = n_target + _OVERDRAFT
+
         # Распределяем вопросы по темам
         n_topics = len(topics)
-        n_per_topic = max(3, (n_target + n_topics - 1) // n_topics)
+        n_per_topic = max(3, (n_request + n_topics - 1) // n_topics)
 
         for t_idx, topic in enumerate(topics, start=1):
             print(f"     Ранг {rank} | тема {t_idx}/{n_topics}: {topic[:50]}")
@@ -780,6 +899,7 @@ def generate_questions_for_section(
                 rank_prompt=RANK_PROMPTS[rank].format(n=n_per_topic),
                 context=ctx[:MAX_CONTEXT_CHARS] if ctx else "(контекст недоступен)",
                 n=n_per_topic,
+                term_glossary=_TERM_GLOSSARY,  # [FIX-З-8]
             )
 
             # [FIX-§15.5.2]
@@ -811,6 +931,7 @@ def generate_questions_for_section(
                 rank_prompt=RANK_PROMPTS[rank].format(n=shortage + 2),
                 context=ctx[:MAX_CONTEXT_CHARS],
                 n=shortage + 2,
+                term_glossary=_TERM_GLOSSARY,  # [FIX-З-8]
             )
             raw = llm(prompt, max_tokens=2000 if rank == 3 else 1400)  # [FIX-§15.5.2] явный, не из закрытой области
             extra = _parse_questions_from_llm(
@@ -824,6 +945,8 @@ def generate_questions_for_section(
         print(f"     ✅ Ранг {rank}: итого {len(rank_questions)} вопросов")
         # [FIX-§2.2.3]
         rank_questions = _filter_duplicate_distractors(rank_questions)
+        # [FIX-З-7] Удаляем почти-дублирующиеся вопросы (Jaccard по биграмам)
+        rank_questions = _filter_near_duplicate_questions(rank_questions)
         all_questions.extend(rank_questions)
 
     print(f"  ✅ Раздел {sec_num}: всего {len(all_questions)} вопросов")

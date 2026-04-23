@@ -384,6 +384,18 @@ def find_reference(
     query_vec = embed(discipline)
 
     sources = [(src, data) for src, data in corpus.items()]
+
+    # [FIX-#10] Сначала ищем точное совпадение названия — без embedding.
+    # Embedding-поиск нашёл rpd_10 «Архитектуры распределённых систем» (0.7966)
+    # вместо rpd_29 «Интеллектуальные системы управления» (0.958) из-за того,
+    # что косинусное расстояние между короткими названиями нестабильно.
+    _disc_lower = discipline.strip().lower()
+    for src, data in sources:
+        title = data.get("title", "")
+        if title.strip().lower() == _disc_lower:
+            print(f"  ✅ Точное совпадение названия дисциплины: {src}")
+            return src, data, 1.0
+
     print(f"  📚 Сравнение с {len(sources)} источниками (по title)...")
 
     best_src, best_score, best_entry = "", -1.0, {}
@@ -613,6 +625,14 @@ def main() -> None:
         with open(args.config, encoding="utf-8") as f:
             cfg = json.load(f)
         discipline = cfg.get("discipline", discipline)
+        # [FIX-#10b] reference_rpd в config.json переопределяет авто-поиск эталона.
+        # Используется когда название дисциплины отсутствует в корпусе точно
+        # (например, «Интеллектуальные системы» vs «Интеллектуальные системы управления»).
+        if args.reference is None:
+            _ref_cfg = cfg.get("reference_rpd", "")
+            if _ref_cfg:
+                args.reference = _ref_cfg
+                print(f"  ℹ️  Эталон из config.json (reference_rpd): {args.reference}")
 
     print(f"\n{'='*55}")
     print(f"  evaluate.py — оценка РПД")
@@ -689,6 +709,9 @@ def main() -> None:
     # Секционный эталон применяется только если score заметно выше глобального.
     _PER_SEC_KEYS = ("lab_works", "practice")
     per_section_refs: dict = {}
+    # [З-10] Всегда логируем лучшего кандидата — даже если не превысил порог.
+    # Без этого section_references:{} скрывает информацию о качестве поиска.
+    _section_best_candidates: dict = {}
 
     print("\n🔎 Поиск секционных эталонов для ЛР/ПЗ...")
     for sec_key in _PER_SEC_KEYS:
@@ -700,6 +723,13 @@ def main() -> None:
         if not src_s:
             print(f"   {sec_key}: эталон не найден в корпусе")
             continue
+        # [З-10] Всегда фиксируем лучшего кандидата для диагностики
+        _section_best_candidates[sec_key] = {
+            "source":     src_s,
+            "title":      corpus.get(src_s, {}).get("title", src_s),
+            "similarity": round(score_s, 4),
+            "used":       False,
+        }
         if score_s > sim_score + 0.02:
             # Секционный эталон лучше → подгружаем из docx, если доступен
             if args.ref_docx_dir:
@@ -709,6 +739,7 @@ def main() -> None:
                     sec_ref_sections = extract_doc_sections(sec_docx_path)
                     text_s = sec_ref_sections.get(sec_key, text_s)
             per_section_refs[sec_key] = (src_s, text_s, score_s)
+            _section_best_candidates[sec_key]["used"] = True  # [З-10]
             title_s = corpus.get(src_s, {}).get("title", src_s)
             print(f"   {sec_key}: «{title_s}» ({src_s}, {score_s:.4f})"
                   f" > глобальный ({sim_score:.4f}) ✅")
@@ -769,6 +800,8 @@ def main() -> None:
             k: {"source": v[0], "title": corpus.get(v[0], {}).get("title", ""), "similarity": round(v[2], 4)}
             for k, v in per_section_refs.items()
         },
+        # [З-10] Диагностика: лучший кандидат по каждой секции (used=True если применён)
+        "section_best_candidates": _section_best_candidates,
         "metrics":           metrics,
         "timestamp":         time.strftime("%Y-%m-%dT%H:%M:%S"),
     }

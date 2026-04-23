@@ -45,9 +45,9 @@ from utils import get_embedding as _embed_raw_utils, EMBED_MODEL
 
 COLLECTION     = "rpd_rag"
 QDRANT_URL     = "http://localhost:6333"
-BATCH_EMBED    = 1       # [M] количество параллельных потоков embedding
+BATCH_EMBED    = 2       # [M] количество параллельных потоков embedding
 # [FIX-#16]
-UPSERT_BATCH   = 64
+UPSERT_BATCH   = 128
 CHUNKS_FILE    = "chunks.jsonl"
 RETRY_COUNT    = 3
 RETRY_DELAY    = 2.0

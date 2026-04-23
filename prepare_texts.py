@@ -327,13 +327,18 @@ def main():
                         else (_raw if isinstance(_raw, list) else [])
                     )
                     _disc_title = extract_discipline_title(_records_for_title)
+                # [FIX-#14] Дедупликация по (название + направление), а не только
+                # по названию. Документы с одинаковым именем но разным direction
+                # (09.03.01 vs 09.04.01) содержат разное содержание — сохраняем оба.
+                _direction_key = (corpus_meta or {}).get(fn, {}).get("direction", "")
                 _disc_key = re.sub(r"\s+", " ", _disc_title.lower().strip()) if _disc_title else ""
-                if _disc_key and _disc_key in seen_disc_titles:
+                _dedup_key = f"{_disc_key}|{_direction_key.lower().strip()}" if _disc_key else ""
+                if _dedup_key and _dedup_key in seen_disc_titles:
                     print(f"  ⏭  {fn}: пропущен (дубль дисциплины «{_disc_title}»)")
                     total_skipped_docs += 1
                     continue
-                if _disc_key:
-                    seen_disc_titles.add(_disc_key)
+                if _dedup_key:
+                    seen_disc_titles.add(_dedup_key)
 
                 w, d = process_file(path, out, seen, corpus_meta=corpus_meta)
                 total_written += w
